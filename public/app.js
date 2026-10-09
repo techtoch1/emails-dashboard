@@ -394,7 +394,8 @@ async function viewPrices() {
   const priced = domains.filter(d => !d.unpriced).length;
   const totalIncome = domains.reduce((s, d) => s + (d.monthly_cost || 0), 0);
   view().innerHTML = `
-    ${sectionHead('Prices', editable ? `<label class="small muted" style="display:flex;align-items:center;gap:6px">Currency <input id="currency" value="${h(p.currency)}" maxlength="3" size="4" aria-label="Currency"></label>` : '')}
+    ${sectionHead('Prices', editable ? `<label class="btn secondary" style="cursor:pointer">Import from Excel<input type="file" id="p-import" accept=".xlsx,.csv" hidden></label><label class="small muted" style="display:flex;align-items:center;gap:6px">Currency <input id="currency" value="${h(p.currency)}" maxlength="3" size="4" aria-label="Currency"></label>` : '')}
+    <div id="p-import-panel"></div>
     <div class="kpis">
       ${kpi('Domains priced', `${n(priced)} / ${n(domains.length)}`, priced === domains.length ? 'every domain has a price' : `${n(domains.length - priced)} still to price`)}
       ${kpi('Monthly income', money(Math.round(totalIncome * 100) / 100, p.currency), 'from the prices set so far')}
@@ -456,6 +457,45 @@ async function viewPrices() {
   $('#currency')?.addEventListener('change', async e => {
     try { await api('/api/settings/currency', { method: 'PUT', body: { currency: e.target.value } }); state.overview = null; render(); }
     catch (err) { alert(err.message); }
+  });
+  $('#p-import')?.addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importPrices(f, p.currency); });
+}
+
+// Uploads a price list, shows what it would change, and applies it on confirm.
+async function importPrices(file, cur) {
+  const panel = $('#p-import-panel');
+  const send = async apply => {
+    const res = await fetch(`/api/prices/import${apply ? '?apply=1' : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Import failed (${res.status})`);
+    return body;
+  };
+  panel.innerHTML = `<div class="note">Reading ${h(file.name)}…</div>`;
+  let r;
+  try { r = await send(false); } catch (e) { panel.innerHTML = `<div class="banner">${h(e.message)}</div>`; return; }
+  const what = c => c.sku === '*' ? (c.license ? `${h(skuShort(c.license))} <span class="muted">(domain price)</span>` : 'All licenses') : h(skuShort(c.sku));
+  panel.innerHTML = `<div class="panel" style="margin-top:16px">
+    <h3>Import ${h(file.name)}</h3>
+    <p class="small muted">Read “${h(r.columns.domain)}”${r.columns.license ? `, “${h(r.columns.license)}”` : ''} and “${h(r.columns.price)}” as the price per email per month.
+      ${n(r.changes.length)} price${r.changes.length === 1 ? '' : 's'} to set${r.unchanged ? `, ${n(r.unchanged)} already the same` : ''}, ${n(r.skipped.length)} row${r.skipped.length === 1 ? '' : 's'} skipped.</p>
+    ${r.changes.length ? `<div class="table-wrap"><table><thead><tr><th>Domain</th><th>License</th><th class="num">Now</th><th class="num">New</th><th></th></tr></thead><tbody>
+      ${r.changes.map(c => `<tr><td>${h(c.domain)}</td><td>${what(c)}</td><td class="num">${c.old == null ? '<span class="muted">not set</span>' : money(c.old, cur)}</td><td class="num"><strong>${money(c.price, cur)}</strong></td><td class="small muted">${c.known ? '' : 'not in the dashboard yet'}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="empty">Nothing to change.</div>'}
+    ${r.skipped.length ? `<details style="margin-top:10px"><summary class="small">Skipped rows (${n(r.skipped.length)})</summary>
+      <div class="table-wrap" style="margin-top:6px"><table><thead><tr><th class="num">Row</th><th>Domain</th><th>License</th><th>Why</th></tr></thead><tbody>
+      ${r.skipped.map(s => `<tr><td class="num">${s.line}</td><td>${h(s.domain)}</td><td>${h(skuShort(s.license))}</td><td class="small">${h(s.reason)}</td></tr>`).join('')}
+      </tbody></table></div></details>` : ''}
+    <p style="margin-top:12px">${r.changes.length ? `<button class="btn" id="imp-go" type="button">Set ${n(r.changes.length)} price${r.changes.length === 1 ? '' : 's'}</button> ` : ''}<button class="btn secondary" id="imp-cancel" type="button">${r.changes.length ? 'Cancel' : 'Close'}</button></p>
+  </div>`;
+  $('#imp-cancel').addEventListener('click', () => { panel.innerHTML = ''; });
+  $('#imp-go')?.addEventListener('click', async () => {
+    $('#imp-go').disabled = true;
+    try {
+      const done = await send(true);
+      state.overview = state.accounts = null;
+      await render();
+      $('#p-import-panel').innerHTML = `<div class="note">${n(done.applied)} price${done.applied === 1 ? '' : 's'} set from ${h(file.name)}. Each one is in the change log below.</div>`;
+    } catch (e) { alert(e.message); $('#imp-go').disabled = false; }
   });
 }
 

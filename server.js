@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const dbm = require('./src/db');
 const auth = require('./src/auth');
 const reports = require('./src/reports');
+const priceImport = require('./src/priceImport');
 const sync = require('./src/sync');
 const { SCOPES, loadKey } = require('./src/google');
 
@@ -142,6 +143,22 @@ function createApp(db, { clientFactory } = {}) {
         .run(domain, sku, old?.price ?? null, price, req.user.username, now);
     });
     res.json({ ok: true });
+  });
+  // Price list import: the file is the request body. Without ?apply=1 it only
+  // reports what would change; with it, the same plan is worked out again
+  // from the file and saved (the browser's copy of the plan is not trusted).
+  app.post('/api/prices/import', can('prices'), express.raw({ type: () => true, limit: '5mb' }), async (req, res) => {
+    try {
+      if (!req.body?.length) return res.status(400).json({ error: 'No file received' });
+      const p = await priceImport.plan(db, req.body);
+      if (req.query.apply === '1') {
+        dbm.tx(db, () => priceImport.apply(db, p.changes, req.user.username));
+        return res.json({ applied: p.changes.length, ...p });
+      }
+      res.json(p);
+    } catch (e) {
+      res.status(400).json({ error: /zip|End of data|Corrupted/i.test(e.message) ? 'That file could not be read as Excel (.xlsx) or CSV' : e.message });
+    }
   });
   app.get('/api/prices/log', can('view'), (req, res) => {
     res.json({ log: db.prepare('SELECT * FROM price_log ORDER BY id DESC LIMIT 200').all() });

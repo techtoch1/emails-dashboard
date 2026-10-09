@@ -78,3 +78,20 @@ test('accountants can start a sync, viewers cannot, and a second one waits for t
   assert.equal(second.started, false);
   assert.match(second.message, /try again in 10 min/);
 });
+
+test('price import: preview writes nothing, apply saves, viewers cannot import', async t => {
+  const { db, server, base } = await start();
+  t.after(() => server.close());
+  const login = async u => (await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: `${u}-password-1` }) })).headers.get('set-cookie').split(';')[0];
+  const csv = 'Domain,Monthly price\nclient.example,9\n';
+  const up = (cookie, q = '') => fetch(`${base}/api/prices/import${q}`, { method: 'POST', headers: { cookie, 'Content-Type': 'application/octet-stream' }, body: csv });
+  const acc = await login('accountant'), viewer = await login('viewer');
+
+  assert.equal((await up(viewer)).status, 403);
+  const preview = await (await up(acc)).json();
+  assert.equal(preview.changes.length, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM prices').get().n, 0);
+  const done = await (await up(acc, '?apply=1')).json();
+  assert.equal(done.applied, 1);
+  assert.equal(db.prepare("SELECT price FROM prices WHERE domain = 'client.example'").get().price, 9);
+});
