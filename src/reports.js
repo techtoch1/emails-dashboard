@@ -14,10 +14,13 @@ function loadPrices(db) {
   return m;
 }
 
-// Monthly price for one account: one price per domain, the same for every
-// licensed email on it whatever the license. Unlicensed accounts cost nothing.
+// Monthly price for one account: the domain's price for this license when
+// one is set (domains holding several licenses), otherwise the domain's
+// single price. Unlicensed accounts cost nothing.
 function priceFor(prices, domain, sku) {
   if (NOT_BILLED.has(sku)) return 0;
+  const exact = prices.get(`${domain}|${sku}`);
+  if (exact != null) return exact;
   const p = prices.get(`${domain}|*`);
   return p != null ? p : null; // null = no price entered yet
 }

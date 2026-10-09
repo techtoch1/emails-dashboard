@@ -353,25 +353,32 @@ async function viewPrices() {
   const [p, log] = await Promise.all([api('/api/prices'), api('/api/prices/log')]);
   const editable = can('prices');
   const domains = p.domains.filter(d => d.accounts);
-  const input = (d, sku, val, label) => editable
-    ? `<input class="price-input" type="number" min="0" step="0.01" inputmode="decimal" data-domain="${h(d)}" data-sku="${h(sku)}" value="${val ?? ''}" placeholder="not set" aria-label="${h(label)}"> <span class="saved" aria-live="polite"></span>`
-    : (val == null ? '<span class="notset">not set</span>' : money(val, p.currency));
+  const priceOf = (d, s) => p.prices.find(x => x.domain === d && x.sku === s)?.price;
+  const costCell = d => d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, p.currency);
+  // placeholder: what applies when the box is empty (the domain price, if any)
+  const input = (d, sku, val, label, fallback) => editable
+    ? `<input class="price-input" type="number" min="0" step="0.01" inputmode="decimal" data-domain="${h(d)}" data-sku="${h(sku)}" value="${val ?? ''}" placeholder="${fallback != null ? h(fallback) : 'not set'}" aria-label="${h(label)}"> <span class="saved" aria-live="polite"></span>`
+    : (val ?? fallback) == null ? '<span class="notset">not set</span>' : money(val ?? fallback, p.currency);
   view().innerHTML = `
     ${sectionHead('Prices', editable ? `<label class="small muted">Currency <input id="currency" value="${h(p.currency)}" maxlength="3" size="4" aria-label="Currency"></label>` : '')}
-    <div class="note">Enter what each domain pays per email per month. That price applies to every licensed email on the domain, whatever its license. ${editable ? 'Changes save as soon as you leave the box, and every change is logged below.' : 'Only an accountant or admin can change prices.'}</div>
+    <div class="note">Enter what each domain pays per email per month. A domain with one license has one box; a domain with several (e.g. Starter and Standard) has one box per license. ${editable ? 'Changes save as soon as you leave the box, and every change is logged below.' : 'Only an accountant or admin can change prices.'}</div>
     <div class="filters"><label>Find <input type="search" id="p-q" placeholder="Domain"></label><label>Show <select id="p-show"><option value="">All domains</option><option value="unset">Without a price</option></select></label></div>
     <div class="table-wrap"><table id="p-table"><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Licensed emails</th><th>Price per email / month</th><th class="num">Monthly cost</th></tr></thead><tbody>
       ${domains.map(d => {
-        const licensed = Object.entries(d.licenses).filter(([s]) => s !== 'Unlicensed' && s !== 'Unknown').reduce((a, [, v]) => a + v, 0);
-        return `<tr data-row="${h(d.domain)}" data-unset="${d.price == null ? 1 : 0}"><td><strong>${h(d.domain)}</strong></td><td>${d.tenants.map(h).join('<br>')}</td>
+        const paid = Object.entries(d.licenses).filter(([s]) => s !== 'Unlicensed' && s !== 'Unknown' && s !== 'Cloud Identity Free');
+        const licensed = paid.reduce((a, [, v]) => a + v, 0);
+        const boxes = paid.length > 1
+          ? paid.sort((a, b) => b[1] - a[1]).map(([s, c]) => `<div style="margin:3px 0;display:flex;align-items:center;gap:8px;justify-content:space-between;max-width:330px"><span class="small">${h(s)} × ${n(c)}</span><span>${input(d.domain, s, priceOf(d.domain, s), `Price per ${s} email on ${d.domain}`, d.price)}</span></div>`).join('')
+          : input(d.domain, '*', d.price, `Price per email for ${d.domain}`);
+        return `<tr data-row="${h(d.domain)}" data-unset="${d.unpriced ? 1 : 0}"><td><strong>${h(d.domain)}</strong></td><td>${d.tenants.map(h).join('<br>')}</td>
         <td class="num">${n(licensed)}</td>
-        <td>${input(d.domain, '*', d.price, `Price per email for ${d.domain}`)}</td>
-        <td class="num">${d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, p.currency)}</td></tr>`;
+        <td>${boxes}</td>
+        <td class="num" data-cost="${h(d.domain)}">${costCell(d)}</td></tr>`;
       }).join('')}
     </tbody></table></div>
     ${sectionHead('Change log')}
-    ${log.log.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Domain</th><th class="num">Old</th><th class="num">New</th><th>By</th></tr></thead><tbody>
-      ${log.log.map(l => `<tr><td>${h(when(l.changed_at))}</td><td>${h(l.domain)}</td><td class="num">${l.old_price == null ? '—' : money(l.old_price, p.currency)}</td><td class="num">${l.new_price == null ? 'removed' : money(l.new_price, p.currency)}</td><td>${h(l.changed_by)}</td></tr>`).join('')}
+    ${log.log.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Domain</th><th>License</th><th class="num">Old</th><th class="num">New</th><th>By</th></tr></thead><tbody>
+      ${log.log.map(l => `<tr><td>${h(when(l.changed_at))}</td><td>${h(l.domain)}</td><td>${l.sku === '*' ? 'All licenses' : h(l.sku)}</td><td class="num">${l.old_price == null ? '—' : money(l.old_price, p.currency)}</td><td class="num">${l.new_price == null ? 'removed' : money(l.new_price, p.currency)}</td><td>${h(l.changed_by)}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">No price has been changed yet.</div>'}`;
 
   const filter = () => {
@@ -390,6 +397,13 @@ async function viewPrices() {
         mark.className = 'saved';
         inp.dataset.orig = inp.value;
         state.overview = state.accounts = null;
+        // Refresh this domain's monthly cost, and the grey fallback shown in
+        // its per-license boxes, without redrawing (keeps the cursor in place).
+        api('/api/prices').then(fresh => {
+          const d = fresh.domains.find(x => x.domain === inp.dataset.domain);
+          const cell = d && view().querySelector(`[data-cost="${CSS.escape(d.domain)}"]`);
+          if (cell) cell.innerHTML = d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, fresh.currency);
+        }).catch(() => {});
         setTimeout(() => { mark.textContent = ''; }, 2500);
       } catch (e) { mark.textContent = e.message; mark.className = 'error'; inp.value = inp.dataset.orig; }
     });

@@ -145,7 +145,7 @@ td .chip, .chip { display: inline-block; font-size: 11px; padding: 1px 6px; bord
 .empty { padding: 40px; text-align: center; color: var(--text-muted); background: var(--surface); border: 1px solid var(--rule); }
 
 .price-input { width: 96px; text-align: right; }
-.saved { color: var(--good); font-size: 12px; }
+.saved { color: var(--good); font-size: 12px; display: inline-block; min-width: 3.2em; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; align-items: end; }
 .form-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-muted); }
 .panel { background: var(--surface); border: 1px solid var(--rule); padding: 14px 16px; margin-bottom: 14px; }
