@@ -184,7 +184,7 @@ function bindGo() { view().querySelectorAll('[data-go]').forEach(b => b.addEvent
 const ACCOUNT_COLS = [
   ['email', 'Email'], ['domain', 'Domain'], ['tenant', 'Tenant'], ['sku', 'License'], ['status', 'Status'],
   ['gmail_gb', 'Gmail', 'num'], ['drive_gb', 'Drive', 'num'], ['total_gb', 'Total storage', 'num'],
-  ['last_login', 'Last login'], ['created_on', 'Created'], ['monthly_cost', 'Monthly cost', 'num'],
+  ['last_active', 'Last activity'], ['created_on', 'Created'], ['monthly_cost', 'Monthly cost', 'num'],
 ];
 async function viewAccounts() {
   const [rows, o] = await Promise.all([getAccounts(), getOverview()]);
@@ -198,8 +198,8 @@ async function viewAccounts() {
       <label>Domain <select id="f-domain">${opt(uniq('domain'), f.domain)}</select></label>
       <label>License <select id="f-sku">${opt(uniq('sku'), f.sku)}</select></label>
       <label>Status <select id="f-status">${opt(['active', 'suspended', 'archived'], f.status)}</select></label>
-      <label>Last login <select id="f-login">
-        <option value="">Any</option><option value="30">Not in 30 days</option><option value="90">Not in 90 days</option><option value="never">Never signed in</option>
+      <label>Last activity <select id="f-login">
+        <option value="">Any</option><option value="30">Not used in 30 days</option><option value="90">Not used in 90 days</option><option value="never">Never used</option>
       </select></label>
       <label>Search <input id="f-q" type="search" placeholder="Name or email" value="${h(f.q || '')}"></label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="f-all" ${state.showAll ? 'checked' : ''}> Include accounts with no Workspace license</label>
@@ -217,7 +217,7 @@ async function viewAccounts() {
     return rows.filter(r =>
       (!f.tenant || r.tenant === f.tenant) && (!f.domain || r.domain === f.domain) && (!f.sku || r.sku === f.sku) &&
       (!f.status || r.status === f.status) &&
-      (!f.login || (f.login === 'never' ? !r.last_login : (!r.last_login || now - new Date(r.last_login) > f.login * 86400000))) &&
+      (!f.login || (f.login === 'never' ? !r.last_active : (!r.last_active || now - new Date(r.last_active) > f.login * 86400000))) &&
       (!q || `${r.email} ${r.full_name || ''}`.toLowerCase().includes(q)));
   };
   const draw = () => {
@@ -239,7 +239,7 @@ async function viewAccounts() {
       <td>${h(r.sku)}${r.extra_skus ? `<div class="small muted">+ ${h(r.extra_skus)}</div>` : ''}</td>
       <td>${r.status === 'active' ? 'Active' : `<span class="chip ${h(r.status)}">${h(r.status)}</span>`}</td>
       <td class="num">${gb(r.gmail_gb)}</td><td class="num">${gb(r.drive_gb)}</td><td class="num">${gb(r.total_gb)}</td>
-      <td title="${h(r.last_login || '')}">${r.last_login ? `${h(day(r.last_login))}<div class="small muted">${h(ago(r.last_login))}</div>` : '<span class="muted">Never</span>'}</td>
+      <td title="Password sign-in: ${h(r.last_login ? day(r.last_login) : 'never')}">${r.last_active ? `${h(day(r.last_active))}<div class="small muted">${h(ago(r.last_active))}</div>` : '<span class="muted">Never</span>'}</td>
       <td>${h(day(r.created_on))}</td>
       <td class="num">${r.monthly_cost === 0 ? money(0, o.currency) : money(r.monthly_cost, o.currency)}</td>
     </tr>`).join('') || `<tr><td colspan="${ACCOUNT_COLS.length}" class="muted">No account matches these filters.</td></tr>`;
@@ -256,8 +256,8 @@ async function viewAccounts() {
     draw();
   }));
   $('#acc-export').addEventListener('click', () => downloadCsv(`accounts-${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Email', 'Name', 'Domain', 'Tenant', 'License', 'Other licenses', 'Status', 'Gmail GB', 'Drive GB', 'Photos GB', 'Total GB', 'Last login', 'Created', 'Org unit', `Monthly cost (${o.currency})`],
-    filtered().map(r => [r.email, r.full_name, r.domain, r.tenant, r.sku, r.extra_skus, r.status, r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_login ? day(r.last_login) : 'Never', day(r.created_on), r.org_unit, r.monthly_cost])));
+    ['Email', 'Name', 'Domain', 'Tenant', 'License', 'Other licenses', 'Status', 'Gmail GB', 'Drive GB', 'Photos GB', 'Total GB', 'Last activity', 'Last password sign-in', 'Created', 'Org unit', `Monthly cost (${o.currency})`],
+    filtered().map(r => [r.email, r.full_name, r.domain, r.tenant, r.sku, r.extra_skus, r.status, r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_active ? day(r.last_active) : 'Never', r.last_login ? day(r.last_login) : 'Never', day(r.created_on), r.org_unit, r.monthly_cost])));
   draw();
 }
 

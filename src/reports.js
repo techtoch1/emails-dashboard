@@ -45,7 +45,9 @@ function currentAccounts(db, { all = false } = {}) {
     if (!t || !t.enabled) continue;
     for (const r of stmt.all(tenant_id, date)) {
       if (!all && isHidden(r)) continue;
-      out.push({ ...r, tenant: t.label, snapshot_date: date, monthly_cost: priceFor(prices, r.domain, r.sku) });
+      // Last time the account was used at all: a sign-in or mailbox access.
+      const last_active = [r.last_login, r.last_activity].filter(Boolean).sort().pop() || null;
+      out.push({ ...r, last_active, tenant: t.label, snapshot_date: date, monthly_cost: priceFor(prices, r.domain, r.sku) });
     }
   }
   return out;

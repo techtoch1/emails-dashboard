@@ -117,3 +117,14 @@ test('Cloud Identity Free is recognised by its name even under another product i
   const { splitLicenses } = require('../src/sync');
   assert.equal(splitLicenses([{ productId: 'Google-Apps', skuId: '1010010001', sku: 'Cloud Identity Free' }]).sku, 'Unlicensed');
 });
+
+test('a database from before last_activity gains the column on open', () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const { DatabaseSync } = require('node:sqlite');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wsd-')), 'old.db');
+  const old = new DatabaseSync(file);
+  old.exec('CREATE TABLE account_snapshots (tenant_id INTEGER, date TEXT, email TEXT, domain TEXT, full_name TEXT, status TEXT, sku TEXT, extra_skus TEXT, gmail_gb REAL, drive_gb REAL, photos_gb REAL, total_gb REAL, last_login TEXT, created_on TEXT, org_unit TEXT, is_admin INTEGER, PRIMARY KEY (tenant_id, date, email))');
+  old.close();
+  const db = dbm.open(file);
+  assert.ok(db.prepare('PRAGMA table_info(account_snapshots)').all().some(c => c.name === 'last_activity'));
+});

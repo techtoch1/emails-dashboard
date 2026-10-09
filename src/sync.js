@@ -103,7 +103,7 @@ function record(db, tenant, data, date) {
       status: u.archived ? 'archived' : u.suspended ? 'suspended' : 'active',
       sku, extra_skus: extra,
       gmail_gb: st.gmail_gb ?? null, drive_gb: st.drive_gb ?? null, photos_gb: st.photos_gb ?? null, total_gb: st.total_gb ?? null,
-      last_login: login, created_on: u.creationTime || null, org_unit: u.orgUnitPath || null, is_admin: u.isAdmin ? 1 : 0,
+      last_login: login, last_activity: st.last_activity ?? null, created_on: u.creationTime || null, org_unit: u.orgUnitPath || null, is_admin: u.isAdmin ? 1 : 0,
     };
   });
 
@@ -118,11 +118,11 @@ function record(db, tenant, data, date) {
 
     db.prepare('DELETE FROM account_snapshots WHERE tenant_id = ? AND date = ?').run(tenant.id, date);
     const ins = db.prepare(`INSERT INTO account_snapshots
-      (tenant_id, date, email, domain, full_name, status, sku, extra_skus, gmail_gb, drive_gb, photos_gb, total_gb, last_login, created_on, org_unit, is_admin)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (tenant_id, date, email, domain, full_name, status, sku, extra_skus, gmail_gb, drive_gb, photos_gb, total_gb, last_login, last_activity, created_on, org_unit, is_admin)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const r of rows) {
       ins.run(tenant.id, date, r.email, r.domain, r.full_name, r.status, r.sku, r.extra_skus,
-        r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_login, r.created_on, r.org_unit, r.is_admin);
+        r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_login, r.last_activity, r.created_on, r.org_unit, r.is_admin);
     }
 
     const insEv = db.prepare('INSERT OR IGNORE INTO events (tenant_id, time, name, email, actor, detail, uid) VALUES (?, ?, ?, ?, ?, ?, ?)');

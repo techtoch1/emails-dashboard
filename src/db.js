@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS account_snapshots (
   sku         TEXT NOT NULL,   -- Workspace license name, 'Unlicensed' when none
   extra_skus  TEXT,            -- other licenses held (Vault, Archived User…), comma-separated
   gmail_gb    REAL, drive_gb REAL, photos_gb REAL, total_gb REAL,
-  last_login  TEXT,            -- NULL = never signed in
+  last_login  TEXT,            -- NULL = never signed in (Google's lastLoginTime: password sign-ins only)
+  last_activity TEXT,          -- newest mailbox/account use from the usage report (Outlook, IMAP, mobile, web)
   created_on  TEXT,
   org_unit    TEXT,
   is_admin    INTEGER NOT NULL DEFAULT 0,
@@ -144,7 +145,14 @@ function open(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+// Columns added after the first release, for databases created before them.
+function migrate(db) {
+  const cols = new Set(db.prepare('PRAGMA table_info(account_snapshots)').all().map(c => c.name));
+  if (!cols.has('last_activity')) db.exec('ALTER TABLE account_snapshots ADD COLUMN last_activity TEXT');
 }
 
 function tx(db, fn) {

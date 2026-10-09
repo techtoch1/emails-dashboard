@@ -54,7 +54,7 @@ test('walks back to the newest day the usage report has data for', async () => {
   const c = new GoogleClient({ key, subject: 'admin@x.example', fetch: f });
   const s = await c.userStorage();
   assert.equal(s.date, new Date(Date.now() - 4 * 86400000).toISOString().slice(0, 10));
-  assert.deepEqual(s.byEmail.get('a@x.example'), { gmail_gb: 1, drive_gb: null, photos_gb: null, total_gb: 2 });
+  assert.deepEqual(s.byEmail.get('a@x.example'), { gmail_gb: 1, drive_gb: null, photos_gb: null, total_gb: 2, last_activity: null });
 });
 
 test('reads seat counts from the customer usage report', async () => {
@@ -65,4 +65,28 @@ test('reads seat counts from the customer usage report', async () => {
   const u = await c.customerUsage();
   assert.deepEqual(u.seats, { gsuite_basic: { total: 50, used: 42 } });
   assert.equal(u.storage_used_mb, 10240);
+});
+
+test('last activity is the newest mailbox access, not the last password sign-in', async () => {
+  const f = mockFetch([[/usage\/users\/all\/dates\//, () => json(200, { usageReports: [{ entity: { userEmail: 'joe@x.example' }, parameters: [
+    { name: 'accounts:used_quota_in_mb', intValue: '1024' },
+    { name: 'accounts:last_login_time', datetimeValue: '2026-09-20T08:00:00.000Z' },
+    { name: 'gmail:last_imap_time', datetimeValue: '2026-10-06T17:30:00.000Z' },
+    { name: 'gmail:last_pop_time', datetimeValue: '1970-01-01T00:00:00.000Z' },
+  ] }] })]]);
+  const c = new GoogleClient({ key, subject: 'admin@x.example', fetch: f });
+  const s = await c.userStorage();
+  assert.equal(s.byEmail.get('joe@x.example').last_activity, '2026-10-06T17:30:00.000Z');
+  assert.match(f.calls.find(x => x.url.includes('/usage/users/')).url, /gmail%3Alast_imap_time/);
+});
+
+test('if Google rejects the activity fields, storage still loads and a warning says why', async () => {
+  const f = mockFetch([[/usage\/users\/all\/dates\//, url => /last_imap_time/.test(decodeURIComponent(url))
+    ? json(400, { error: { message: 'Invalid parameter' } })
+    : json(200, { usageReports: [{ entity: { userEmail: 'a@x.example' }, parameters: [{ name: 'accounts:used_quota_in_mb', intValue: '2048' }] }] })]]);
+  const c = new GoogleClient({ key, subject: 'admin@x.example', fetch: f });
+  const warnings = [];
+  const s = await c.userStorage(w => warnings.push(w));
+  assert.equal(s.byEmail.get('a@x.example').total_gb, 2);
+  assert.match(warnings.join(' '), /Last activity not available/);
 });

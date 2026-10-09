@@ -69,7 +69,8 @@ function createApp(db, { clientFactory } = {}) {
     { key: 'tenant', label: 'Tenant' }, { key: 'status', label: 'Status' }, { key: 'sku', label: 'License' },
     { key: 'extra_skus', label: 'Other licenses' },
     { key: 'gmail_gb', label: 'Gmail GB' }, { key: 'drive_gb', label: 'Drive GB' }, { key: 'photos_gb', label: 'Photos GB' }, { key: 'total_gb', label: 'Total GB' },
-    { get: r => r.last_login ? r.last_login.slice(0, 10) : 'Never', label: 'Last login' },
+    { get: r => r.last_active ? r.last_active.slice(0, 10) : 'Never', label: 'Last activity' },
+    { get: r => r.last_login ? r.last_login.slice(0, 10) : 'Never', label: 'Last password sign-in' },
     { get: r => r.created_on ? r.created_on.slice(0, 10) : '', label: 'Created' },
     { key: 'org_unit', label: 'Org unit' }, { key: 'monthly_cost', label: 'Monthly cost' },
   ];

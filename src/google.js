@@ -182,10 +182,21 @@ class GoogleClient {
     return { date: null, reports: [] };
   }
 
-  async userStorage(warn) {
-    const { date, reports } = await this.latestUsage('users', {
-      parameters: 'accounts:gmail_used_quota_in_mb,accounts:drive_used_quota_in_mb,accounts:gplus_photos_used_quota_in_mb,accounts:used_quota_in_mb',
-    }, warn);
+  // Storage per account, plus when each mailbox was last actually used.
+  // The Directory's lastLoginTime only moves when someone types a password,
+  // so an Outlook or phone user who stays signed in looks idle for weeks;
+  // these usage times record the access itself (IMAP, Outlook sync, mobile, web).
+  async userStorage(warn = () => {}) {
+    const storage = 'accounts:gmail_used_quota_in_mb,accounts:drive_used_quota_in_mb,accounts:gplus_photos_used_quota_in_mb,accounts:used_quota_in_mb';
+    let result;
+    try {
+      result = await this.latestUsage('users', { parameters: `${storage},${ACTIVITY_PARAMS.join(',')}` }, warn);
+    } catch (e) {
+      if (!(e instanceof GoogleError && e.status === 400)) throw e;
+      warn(`Last activity not available (${e.message}); showing Google's last sign-in only`);
+      result = await this.latestUsage('users', { parameters: storage }, warn);
+    }
+    const { date, reports } = result;
     const byEmail = new Map();
     for (const r of reports) {
       const p = paramMap(r.parameters);
@@ -194,6 +205,7 @@ class GoogleClient {
         drive_gb: mbToGb(p['accounts:drive_used_quota_in_mb']),
         photos_gb: mbToGb(p['accounts:gplus_photos_used_quota_in_mb']),
         total_gb: mbToGb(p['accounts:used_quota_in_mb']),
+        last_activity: latest(ACTIVITY_PARAMS.map(k => p[k])),
       });
     }
     return { date, byEmail };
@@ -242,6 +254,18 @@ class GoogleClient {
 }
 
 const RELEVANT_EVENT = /^(CREATE_USER|DELETE_USER|UNDELETE_USER|SUSPEND_USER|UNSUSPEND_USER|ARCHIVE_USER|UNARCHIVE_USER|RENAME_USER)$|LICENSE/;
+
+const ACTIVITY_PARAMS = [
+  'accounts:last_login_time', 'accounts:last_sso_time',
+  'gmail:last_access_time', 'gmail:last_imap_time', 'gmail:last_pop_time',
+  'gmail:last_webmail_time', 'gmail:last_interaction_time',
+];
+// Newest real timestamp of several (Google reports "never" as 1970).
+function latest(values) {
+  let best = null;
+  for (const v of values) if (typeof v === 'string' && v > '1971' && (!best || v > best)) best = v;
+  return best;
+}
 
 function paramMap(params = []) {
   const m = {};
