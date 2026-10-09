@@ -173,7 +173,6 @@ function tenantCard(t) {
     <div class="row"><span>Storage (accounts)</span><span class="num">${gb(t.storage_gb)}</span></div>
     ${t.pooled_total_gb ? `<div class="row"><span>Pooled storage</span><span class="num">${gb(t.pooled_used_gb)} of ${gb(t.pooled_total_gb)}</span></div>` : ''}
     <div class="row"><span>Monthly cost</span><span class="num">${money(t.monthly_cost, state.overview.currency)}</span></div>
-    ${t.unpriced ? `<div class="small notset">${n(t.unpriced)} licensed account${t.unpriced === 1 ? ' has' : 's have'} no price yet</div>` : ''}
     ${lic}
     ${gs.length ? `<div class="small muted">Google reports: ${gs.map(([k, v]) => `${h(k.replace(/_/g, ' '))} ${n(v.used)} of ${n(v.total)}`).join(' · ')}</div>` : ''}
     <div class="sync">${s ? `${s.ok ? '<span class="ok">Synced</span>' : '<span class="bad">Sync failed</span>'} ${h(when(s.at))}${s.error ? `<div class="bad">${h(s.error)}</div>` : ''}${s.warnings?.length ? `<div class="small" style="color:var(--warn-fg)">${s.warnings.length} warning${s.warnings.length === 1 ? '' : 's'} — see Tenants</div>` : ''}` : '<span class="muted">Not synced yet</span>'}</div>
