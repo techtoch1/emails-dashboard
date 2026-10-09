@@ -352,29 +352,26 @@ async function viewBilling() {
 async function viewPrices() {
   const [p, log] = await Promise.all([api('/api/prices'), api('/api/prices/log')]);
   const editable = can('prices');
-  const priceOf = (d, s) => p.prices.find(x => x.domain === d && x.sku === s)?.price;
   const domains = p.domains.filter(d => d.accounts);
   const input = (d, sku, val, label) => editable
-    ? `<input class="price-input" type="number" min="0" step="0.01" inputmode="decimal" data-domain="${h(d)}" data-sku="${h(sku)}" value="${val ?? ''}" placeholder="${sku === '*' ? 'not set' : sku === 'Unlicensed' ? 'free' : 'same'}" aria-label="${h(label)}"> <span class="saved" aria-live="polite"></span>`
+    ? `<input class="price-input" type="number" min="0" step="0.01" inputmode="decimal" data-domain="${h(d)}" data-sku="${h(sku)}" value="${val ?? ''}" placeholder="not set" aria-label="${h(label)}"> <span class="saved" aria-live="polite"></span>`
     : (val == null ? '<span class="notset">not set</span>' : money(val, p.currency));
   view().innerHTML = `
     ${sectionHead('Prices', editable ? `<label class="small muted">Currency <input id="currency" value="${h(p.currency)}" maxlength="3" size="4" aria-label="Currency"></label>` : '')}
-    <div class="note">Enter what each domain pays per email per month. The domain price applies to every licensed email on it; fill a license's own box only when that license is priced differently. ${editable ? 'Changes save as soon as you leave the box, and every change is logged below.' : 'Only an accountant or admin can change prices.'}</div>
+    <div class="note">Enter what each domain pays per email per month. That price applies to every licensed email on the domain, whatever its license. ${editable ? 'Changes save as soon as you leave the box, and every change is logged below.' : 'Only an accountant or admin can change prices.'}</div>
     <div class="filters"><label>Find <input type="search" id="p-q" placeholder="Domain"></label><label>Show <select id="p-show"><option value="">All domains</option><option value="unset">Without a price</option></select></label></div>
-    <div class="table-wrap"><table id="p-table"><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Licensed emails</th><th>Price per email / month</th><th>Different price for a license</th><th class="num">Monthly cost</th></tr></thead><tbody>
+    <div class="table-wrap"><table id="p-table"><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Licensed emails</th><th>Price per email / month</th><th class="num">Monthly cost</th></tr></thead><tbody>
       ${domains.map(d => {
-        const skus = Object.keys(d.licenses).filter(s => s !== 'Unknown');
         const licensed = Object.entries(d.licenses).filter(([s]) => s !== 'Unlicensed' && s !== 'Unknown').reduce((a, [, v]) => a + v, 0);
         return `<tr data-row="${h(d.domain)}" data-unset="${d.price == null ? 1 : 0}"><td><strong>${h(d.domain)}</strong></td><td>${d.tenants.map(h).join('<br>')}</td>
         <td class="num">${n(licensed)}</td>
         <td>${input(d.domain, '*', d.price, `Price per email for ${d.domain}`)}</td>
-        <td>${skus.map(s => `<div style="margin:2px 0"><span class="small">${h(s)} × ${n(d.licenses[s])}</span> ${input(d.domain, s, priceOf(d.domain, s), `Price for ${s} on ${d.domain}`)}</div>`).join('')}</td>
         <td class="num">${d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, p.currency)}</td></tr>`;
       }).join('')}
     </tbody></table></div>
     ${sectionHead('Change log')}
-    ${log.log.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Domain</th><th>License</th><th class="num">Old</th><th class="num">New</th><th>By</th></tr></thead><tbody>
-      ${log.log.map(l => `<tr><td>${h(when(l.changed_at))}</td><td>${h(l.domain)}</td><td>${l.sku === '*' ? 'All licenses' : h(l.sku)}</td><td class="num">${l.old_price == null ? '—' : money(l.old_price, p.currency)}</td><td class="num">${l.new_price == null ? 'removed' : money(l.new_price, p.currency)}</td><td>${h(l.changed_by)}</td></tr>`).join('')}
+    ${log.log.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Domain</th><th class="num">Old</th><th class="num">New</th><th>By</th></tr></thead><tbody>
+      ${log.log.map(l => `<tr><td>${h(when(l.changed_at))}</td><td>${h(l.domain)}</td><td class="num">${l.old_price == null ? '—' : money(l.old_price, p.currency)}</td><td class="num">${l.new_price == null ? 'removed' : money(l.new_price, p.currency)}</td><td>${h(l.changed_by)}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">No price has been changed yet.</div>'}`;
 
   const filter = () => {

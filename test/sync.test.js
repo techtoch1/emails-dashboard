@@ -43,10 +43,10 @@ test('a missing licensing permission is a warning, not a failed sync', async () 
   assert.equal(reports.currentAccounts(db)[0].sku, 'Unknown');
 });
 
-test('prices: license-specific beats domain price; unlicensed is free unless priced', () => {
+test('prices: one price per domain for every licensed email; unlicensed is free', () => {
   const p = new Map([['d.example|*', 6], ['d.example|Business Plus', 18]]);
   assert.equal(reports.priceFor(p, 'd.example', 'Business Starter'), 6);
-  assert.equal(reports.priceFor(p, 'd.example', 'Business Plus'), 18);
+  assert.equal(reports.priceFor(p, 'd.example', 'Business Plus'), 6, 'old per-license rows are ignored');
   assert.equal(reports.priceFor(p, 'd.example', 'Unlicensed'), 0);
   assert.equal(reports.priceFor(p, 'other.example', 'Business Starter'), null);
 });

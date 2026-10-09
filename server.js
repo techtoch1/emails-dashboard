@@ -115,7 +115,7 @@ function createApp(db, { clientFactory } = {}) {
   });
   app.put('/api/prices', can('prices'), (req, res) => {
     const domain = String(req.body?.domain || '').toLowerCase().trim();
-    const sku = String(req.body?.sku || '*').trim() || '*';
+    const sku = '*'; // one price per domain; per-license prices are not offered
     const raw = req.body?.price;
     if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
     const price = raw === null || raw === '' ? null : Number(raw);
