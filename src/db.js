@@ -169,6 +169,15 @@ function migrate(db) {
   if (!cols.has('last_activity')) db.exec('ALTER TABLE account_snapshots ADD COLUMN last_activity TEXT');
   // A purchased count of 0 was only ever a mis-entry (a license in use was bought).
   db.exec('DELETE FROM seat_overrides WHERE seats = 0');
+  // A price of 0 means "no price set". Clear any saved before that rule,
+  // and log each one so the change log explains where they went.
+  const zero = db.prepare('SELECT domain, sku FROM prices WHERE price = 0').all();
+  if (zero.length) {
+    const now = new Date().toISOString();
+    const log = db.prepare("INSERT INTO price_log (domain, sku, old_price, new_price, changed_by, changed_at) VALUES (?, ?, 0, NULL, 'system (0 = no price)', ?)");
+    for (const z of zero) log.run(z.domain, z.sku, now);
+    db.exec('DELETE FROM prices WHERE price = 0');
+  }
 }
 
 function tx(db, fn) {

@@ -10,7 +10,8 @@ const isHidden = r => NO_WORKSPACE.has(r.sku);
 
 function loadPrices(db) {
   const m = new Map();
-  for (const p of db.prepare('SELECT domain, sku, price FROM prices').all()) m.set(`${p.domain}|${p.sku}`, p.price);
+  // 0 means "no price set", so it is never loaded as a price.
+  for (const p of db.prepare('SELECT domain, sku, price FROM prices WHERE price > 0').all()) m.set(`${p.domain}|${p.sku}`, p.price);
   return m;
 }
 

@@ -413,7 +413,7 @@ async function viewPrices() {
   // A domain is paying when its emails bring in money, free when every
   // license on it is priced at 0 (internal, not billed), and still to price
   // while any license on it has no price.
-  const kindOf = d => d.unpriced ? 'unset' : (d.monthly_cost > 0 ? 'paying' : 'free');
+  const kindOf = d => d.unpriced ? 'unset' : 'paying';
   const count = k => domains.filter(d => kindOf(d) === k).length;
   const totalIncome = domains.reduce((s, d) => s + (d.monthly_cost || 0), 0);
   view().innerHTML = `
@@ -421,14 +421,13 @@ async function viewPrices() {
     <div id="p-import-panel"></div>
     <div class="kpis">
       ${kpi('Paying domains', n(count('paying')), `of ${n(domains.length)} domains`)}
-      ${kpi('Free ($0)', n(count('free')), 'internal or not billed')}
-      ${kpi('No price yet', n(count('unset')), count('unset') ? 'set a price, or 0 if not billed' : 'every domain has a price', count('unset') > 0)}
+      ${kpi('No price yet', n(count('unset')), count('unset') ? 'no price, or not billed' : 'every domain has a price', count('unset') > 0)}
       ${kpi('Monthly income', money(Math.round(totalIncome * 100) / 100, p.currency), 'from the prices set so far')}
     </div>
     <div class="filters">
       <label>Find <input type="search" id="p-q" placeholder="Domain"></label>
       <label>Tenant <select id="p-tenant"><option value="">All tenants</option>${tenantsList.map(t => `<option>${h(t)}</option>`).join('')}</select></label>
-      <label>Show <select id="p-show"><option value="">All domains</option><option value="unset">No price yet</option><option value="paying">Paying</option><option value="free">Free ($0)</option><option value="mine">Notes for me${nr.mine ? ` (${n(nr.mine)})` : ''}</option><option value="open">With open notes</option></select></label>
+      <label>Show <select id="p-show"><option value="">All domains</option><option value="unset">No price yet</option><option value="paying">Paying</option><option value="mine">Notes for me${nr.mine ? ` (${n(nr.mine)})` : ''}</option><option value="open">With open notes</option></select></label>
       <span class="spacer"></span>
       <span class="small muted" style="max-width:420px">${editable ? 'Price per email per month. A domain with two licenses (e.g. Starter and Standard) has a box for each. Saves when you leave the box; every change is logged below.' : 'Only an accountant or admin can change prices.'}</span>
     </div>
@@ -457,7 +456,7 @@ async function viewPrices() {
     const q = $('#p-q').value.toLowerCase(), t = $('#p-tenant').value, show = $('#p-show').value;
     view().querySelectorAll('#p-table tbody tr[data-row]').forEach(tr => {
       const hide = (q && !tr.dataset.row.includes(q)) || (t && !tr.dataset.tenants.split('|').includes(t)) ||
-        (['unset', 'paying', 'free'].includes(show) && tr.dataset.kind !== show) || (show === 'open' && tr.dataset.open !== '1') || (show === 'mine' && tr.dataset.mine !== '1');
+        (['unset', 'paying'].includes(show) && tr.dataset.kind !== show) || (show === 'open' && tr.dataset.open !== '1') || (show === 'mine' && tr.dataset.mine !== '1');
       tr.classList.toggle('hidden', hide);
       const nrow = tr.nextElementSibling;
       if (hide) nrow.classList.add('hidden');

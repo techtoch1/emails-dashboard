@@ -129,8 +129,10 @@ function createApp(db, { clientFactory } = {}) {
     if (sku.length > 80) return res.status(400).json({ error: 'Invalid license' });
     const raw = req.body?.price;
     if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
-    const price = raw === null || raw === '' ? null : Number(raw);
+    // 0 means "no price set": saving 0 clears the price, like an empty box.
+    let price = raw === null || raw === '' ? null : Number(raw);
     if (price !== null && (!Number.isFinite(price) || price < 0)) return res.status(400).json({ error: 'Price must be a number ≥ 0' });
+    if (price === 0) price = null;
     const now = new Date().toISOString();
     dbm.tx(db, () => {
       const old = db.prepare('SELECT price FROM prices WHERE domain = ? AND sku = ?').get(domain, sku);

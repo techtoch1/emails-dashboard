@@ -112,3 +112,14 @@ test('notes on a domain: mentions known users, counts open ones per user, viewer
   assert.equal(after.mine, 0);
   assert.equal(after.notes[0].resolved_by, 'accountant');
 });
+
+test('a price of 0 means no price: saving 0 clears it', async t => {
+  const { db, server, as } = await start();
+  t.after(() => server.close());
+  const acc = await as('accountant');
+  await acc('/api/prices', { method: 'PUT', body: { domain: 'client.example', price: 6 } });
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM prices').get().n, 1);
+  assert.equal((await acc('/api/prices', { method: 'PUT', body: { domain: 'client.example', price: 0 } })).status, 200);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM prices').get().n, 0);
+  assert.equal(db.prepare('SELECT new_price FROM price_log ORDER BY id DESC LIMIT 1').get().new_price, null);
+});

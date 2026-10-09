@@ -64,3 +64,18 @@ test('a CSV works too, and a sheet without a price column is refused clearly', a
   assert.deepEqual(p.changes.map(c => [c.domain, c.sku, c.price]), [['one.example', '*', 7.5]]);
   await assert.rejects(plan(db, Buffer.from('Domain,Users\none.example,3\n')), /No price column/);
 });
+
+test('0 is no price: zeros saved earlier are cleared on open, and a 0 in a file is skipped', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wsd-')), 'z.db');
+  let db = dbm.open(file);
+  db.prepare("INSERT INTO prices (domain, sku, price, updated_at) VALUES ('free.example', '*', 0, 'x'), ('paid.example', '*', 6, 'x')").run();
+  db.close();
+  db = dbm.open(file);
+  assert.deepEqual(db.prepare('SELECT domain FROM prices').all().map(r => r.domain), ['paid.example']);
+  assert.equal(db.prepare("SELECT changed_by FROM price_log WHERE domain = 'free.example'").get().changed_by, 'system (0 = no price)');
+
+  const p = await plan(db, Buffer.from('Domain,Price\nzero.example,0\n'));
+  assert.equal(p.changes.length, 0);
+  assert.equal(p.skipped[0].domain, 'zero.example');
+});

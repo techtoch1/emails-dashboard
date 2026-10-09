@@ -60,7 +60,8 @@ function findColumns(header) {
 function toPrice(v) {
   if (v == null || v === '') return null;
   const n = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, ''));
-  return Number.isFinite(n) && n >= 0 && String(v).trim() !== '' ? Math.round(n * 100) / 100 : null;
+  // 0 means "no price set", so a 0 in the file is treated like an empty cell.
+  return Number.isFinite(n) && n > 0 && String(v).trim() !== '' ? Math.round(n * 100) / 100 : null;
 }
 
 async function plan(db, buf) {
