@@ -185,3 +185,11 @@ tr.note-row > td { background: var(--surface-2); padding: 10px 14px 14px; }
 .add-note textarea { width: 100%; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); padding: 7px 9px; resize: vertical; }
 .add-note .mention-bar { margin: 6px 0 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .mention-pick { cursor: pointer; background: var(--surface); font: inherit; font-size: 11px; color: var(--link); }
+
+/* Tenants: how-to guide */
+.guide summary { cursor: pointer; }
+.guide .steps { margin: 10px 0 6px; padding-left: 22px; }
+.guide .steps li { margin: 8px 0; }
+.copy-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 4px; }
+.copy-row pre.copy, .copy-row code { flex: 1; margin: 0; }
+.copy-row code { padding: 6px 8px; flex: 0 1 auto; }

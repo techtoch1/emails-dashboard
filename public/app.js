@@ -601,15 +601,23 @@ async function viewTenants() {
   const sa = setup.serviceAccount;
   view().innerHTML = `
     ${sectionHead('Tenants', '<button class="btn" id="t-add" type="button">Add tenant</button>')}
-    <div class="note"><strong>Connecting a tenant (once per tenant, by a super admin of that tenant):</strong>
-      <ol>
-        <li>In <a href="https://admin.google.com/ac/owl/domainwidedelegation" target="_blank" rel="noopener">Admin console → Security → API controls → Domain-wide delegation</a>, choose <em>Add new</em>.</li>
-        <li>Client ID: ${sa?.client_id ? `<code>${h(sa.client_id)}</code>` : `<span class="bad">${h(sa?.error || 'no service-account key on the server yet')}</span>`}</li>
-        <li>OAuth scopes (paste as one line):<pre class="copy">${h(setup.scopes.join(','))}</pre></li>
-        <li>Add the tenant here with an admin address the dashboard reads as, then <em>Test connection</em>.</li>
+    <details class="note guide" ${data.tenants.length ? '' : 'open'}>
+      <summary><strong>How to add a new tenant</strong> <span class="small muted">— about 3 minutes, once per tenant</span></summary>
+      <ol class="steps">
+        <li><strong>Open a private window</strong> (Ctrl+Shift+N, Mac: Cmd+Shift+N) and sign in as a <strong>super admin of the new tenant</strong>.</li>
+        <li><strong>Go to</strong> <a href="https://admin.google.com/ac/owl/domainwidedelegation" target="_blank" rel="noopener">admin.google.com/ac/owl/domainwidedelegation</a> and click <strong>Add new</strong>.
+          <div class="small muted">If that link shows another page: Security → Access and data control → API controls → Manage Domain Wide Delegation.</div></li>
+        <li><strong>Client ID</strong> — paste:
+          ${sa?.client_id ? `<div class="copy-row"><code id="g-client">${h(sa.client_id)}</code><button type="button" class="btn secondary small" data-copy="g-client">Copy</button></div>` : `<div class="bad">${h(sa?.error || 'No service-account key on the server yet')}</div>`}</li>
+        <li><strong>OAuth scopes</strong> — paste the whole line:
+          <div class="copy-row"><pre class="copy" id="g-scopes">${h(setup.scopes.join(','))}</pre><button type="button" class="btn secondary small" data-copy="g-scopes">Copy</button></div></li>
+        <li>Click <strong>Authorize</strong>, then close the private window.</li>
+        <li>Back here, click <strong>Add tenant</strong> (above). Name: anything you recognise. <strong>Admin email to read as</strong>: an admin of <em>that</em> tenant (not one from a tenant already added). Leave the rest as is and <strong>Save</strong>.</li>
+        <li>Click <strong>Test connection</strong> on the new tenant — every line should show ✓. A ✗ on the first line right after authorizing usually means Google needs a few more minutes; test again in 5.</li>
+        <li>Click <strong>Sync now</strong> (top right). The tenant's emails appear on the Overview in a minute or two.</li>
       </ol>
-      <span class="small muted">Every scope is read-only except licensing, for which Google offers no read-only scope; this app only ever reads with it. Daily sync runs at ${String(setup.syncHourUtc).padStart(2, '0')}:00 UTC.</span>
-    </div>
+      <p class="small muted">No Cloud Shell or new key is needed: the same Client ID and scopes work for every tenant. Every scope is read-only except licensing, for which Google offers no read-only scope; this dashboard only ever reads with it. Daily sync runs at ${String(setup.syncHourUtc).padStart(2, '0')}:00 UTC.</p>
+    </details>
     <div id="t-form"></div>
     ${data.tenants.length ? data.tenants.map(t => `<div class="panel">
       <div class="section-head" style="margin-top:0"><h3>${h(t.label)}${t.enabled ? '' : ' <span class="chip">disabled</span>'}</h3><span class="rule" aria-hidden="true"></span>
@@ -653,6 +661,12 @@ async function viewTenants() {
     $('#t-form').scrollIntoView({ behavior: 'smooth' });
   };
   $('#t-add').addEventListener('click', () => form());
+  view().querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {
+    const text = document.getElementById(b.dataset.copy).textContent;
+    try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; }
+    catch { const r = document.createRange(); r.selectNodeContents(document.getElementById(b.dataset.copy)); getSelection().removeAllRanges(); getSelection().addRange(r); b.textContent = 'Selected — press Ctrl+C'; }
+    setTimeout(() => { b.textContent = 'Copy'; }, 2500);
+  }));
   view().querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => form(data.tenants.find(t => t.id === Number(b.dataset.edit)))));
   view().querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', async () => {
     const t = data.tenants.find(x => x.id === Number(b.dataset.remove));
