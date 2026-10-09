@@ -167,3 +167,21 @@ table.prices td { vertical-align: middle; }
 .price-box .cur { font-size: 11px; color: var(--text-muted); padding: 0 6px; border-right: 1px solid var(--rule); align-self: stretch; display: flex; align-items: center; background: var(--surface-2); }
 .price-box .price-input { border: 0; width: 84px; padding: 5px 8px; }
 .price-box:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Notes on domains (Prices) */
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; font-size: 11px; line-height: 18px; text-align: center; color: #fff; background: var(--aligned-poseidon); border-radius: 9px; font-weight: 700; }
+.note-btn { font: inherit; font-size: 12px; background: none; border: 1px solid var(--border); padding: 3px 9px; cursor: pointer; color: var(--link); white-space: nowrap; }
+.note-btn:hover { border-color: var(--accent); }
+.note-btn.for-me { border-color: var(--aligned-poseidon); background: var(--aligned-poseidon); color: #fff; font-weight: 700; }
+tr.note-row > td { background: var(--surface-2); padding: 10px 14px 14px; }
+.thread { max-width: 760px; }
+.thread .note { background: var(--surface); border: 1px solid var(--rule); border-left: 3px solid var(--border); padding: 8px 10px; margin-bottom: 8px; }
+.thread .note.for-me { border-left-color: var(--aligned-poseidon); }
+.thread .note.done { opacity: .65; }
+.thread .note .meta { font-size: 12px; color: var(--text-muted); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.thread .note .meta .linkish { margin-left: auto; }
+.thread .note .body { margin-top: 4px; white-space: normal; word-wrap: break-word; }
+.mention { color: var(--aligned-poseidon); font-weight: 700; }
+.add-note textarea { width: 100%; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); padding: 7px 9px; resize: vertical; }
+.add-note .mention-bar { margin: 6px 0 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.mention-pick { cursor: pointer; background: var(--surface); font: inherit; font-size: 11px; color: var(--link); }

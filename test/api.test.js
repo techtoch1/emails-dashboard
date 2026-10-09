@@ -95,3 +95,20 @@ test('price import: preview writes nothing, apply saves, viewers cannot import',
   assert.equal(done.applied, 1);
   assert.equal(db.prepare("SELECT price FROM prices WHERE domain = 'client.example'").get().price, 9);
 });
+
+test('notes on a domain: mentions known users, counts open ones per user, viewers read only', async t => {
+  const { server, as } = await start();
+  t.after(() => server.close());
+  const admin = await as('admin'), accountant = await as('accountant'), viewer = await as('viewer');
+  const add = await admin('/api/notes', { method: 'POST', body: { domain: 'client.example', body: '@accountant pays yearly; @nobody is not a user' } });
+  const { note } = await add.json();
+  assert.deepEqual(note.mentions, ['accountant']);
+  assert.equal((await (await accountant('/api/notes')).json()).mine, 1);
+  assert.equal((await (await admin('/api/notes')).json()).mine, 0);
+  assert.equal((await viewer('/api/notes', { method: 'POST', body: { domain: 'client.example', body: 'hi' } })).status, 403);
+  assert.equal((await viewer('/api/notes')).status, 200);
+  await accountant(`/api/notes/${note.id}/resolve`, { method: 'POST', body: { resolved: true } });
+  const after = await (await accountant('/api/notes')).json();
+  assert.equal(after.mine, 0);
+  assert.equal(after.notes[0].resolved_by, 'accountant');
+});

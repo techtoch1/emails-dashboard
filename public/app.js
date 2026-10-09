@@ -85,6 +85,16 @@ async function boot() {
   const fromHash = location.hash.slice(1);
   if (fromHash && document.querySelector(`#tabs button[data-view="${fromHash}"]:not(.hidden)`)) state.view = fromHash;
   render();
+  refreshNoteBadge();
+}
+
+// Count of open notes that mention the signed-in user, on the Prices tab.
+async function refreshNoteBadge() {
+  const r = await api('/api/notes').catch(() => null);
+  const tab = document.querySelector('#tabs button[data-view="prices"]');
+  if (!r || !tab) return;
+  tab.querySelector('.badge')?.remove();
+  if (r.mine) tab.insertAdjacentHTML('beforeend', ` <span class="badge" title="Open notes that mention you">${r.mine}</span>`);
 }
 
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
@@ -375,7 +385,16 @@ async function viewBilling() {
 
 // ---- Prices ------------------------------------------------------------------
 async function viewPrices() {
-  const [p, log] = await Promise.all([api('/api/prices'), api('/api/prices/log')]);
+  const [p, log, nr, pr] = await Promise.all([api('/api/prices'), api('/api/prices/log'), api('/api/notes'), api('/api/people')]);
+  const me = state.me.username;
+  const notesBy = new Map();
+  for (const note of nr.notes) (notesBy.get(note.domain) || notesBy.set(note.domain, []).get(note.domain)).push(note);
+  const openOf = d => (notesBy.get(d) || []).filter(x => !x.resolved_at);
+  const forMe = d => openOf(d).some(x => x.mentions.includes(me));
+  const noteBtn = d => {
+    const open = openOf(d).length, all = (notesBy.get(d) || []).length;
+    return `<button type="button" class="note-btn${forMe(d) ? ' for-me' : ''}" data-notes="${h(d)}" aria-expanded="false">${open ? `${n(open)} open note${open === 1 ? '' : 's'}` : all ? `${n(all)} note${all === 1 ? '' : 's'}` : (can('prices') ? '+ Note' : '—')}</button>`;
+  };
   const editable = can('prices');
   const domains = p.domains.filter(d => d.accounts);
   const priceOf = (d, s) => p.prices.find(x => x.domain === d && x.sku === s)?.price;
@@ -403,22 +422,24 @@ async function viewPrices() {
     <div class="filters">
       <label>Find <input type="search" id="p-q" placeholder="Domain"></label>
       <label>Tenant <select id="p-tenant"><option value="">All tenants</option>${tenantsList.map(t => `<option>${h(t)}</option>`).join('')}</select></label>
-      <label>Show <select id="p-show"><option value="">All domains</option><option value="unset">Still to price</option></select></label>
+      <label>Show <select id="p-show"><option value="">All domains</option><option value="unset">Still to price</option><option value="mine">Notes for me${nr.mine ? ` (${n(nr.mine)})` : ''}</option><option value="open">With open notes</option></select></label>
       <span class="spacer"></span>
       <span class="small muted" style="max-width:420px">${editable ? 'Price per email per month. A domain with two licenses (e.g. Starter and Standard) has a box for each. Saves when you leave the box; every change is logged below.' : 'Only an accountant or admin can change prices.'}</span>
     </div>
-    <div class="table-wrap"><table id="p-table" class="prices"><thead><tr><th>Domain</th><th class="num">Emails</th><th>Price per email / month</th><th class="num">Monthly income</th></tr></thead><tbody>
+    <div class="table-wrap"><table id="p-table" class="prices"><thead><tr><th>Domain</th><th class="num">Emails</th><th>Price per email / month</th><th class="num">Monthly income</th><th>Notes</th></tr></thead><tbody>
       ${domains.map(d => {
         const paid = paidOf(d);
         const licensed = paid.reduce((a, [, v]) => a + v, 0);
         const boxes = paid.length > 1
           ? paid.map(([s, c]) => cell(d.domain, s, s, c, priceOf(d.domain, s), d.price)).join('')
           : cell(d.domain, '*', paid[0]?.[0] || 'All licenses', licensed, d.price);
-        return `<tr data-row="${h(d.domain)}" data-tenants="${h(d.tenants.join('|'))}" data-unset="${d.unpriced ? 1 : 0}">
+        return `<tr data-row="${h(d.domain)}" data-tenants="${h(d.tenants.join('|'))}" data-unset="${d.unpriced ? 1 : 0}" data-open="${openOf(d.domain).length ? 1 : 0}" data-mine="${forMe(d.domain) ? 1 : 0}">
           <td><strong>${h(d.domain)}</strong><div class="small muted">${d.tenants.map(h).join(', ')}</div></td>
           <td class="num">${n(licensed)}</td>
           <td><div class="price-grid">${boxes}</div></td>
-          <td class="num" data-income="${h(d.domain)}">${incomeCell(d)}</td></tr>`;
+          <td class="num" data-income="${h(d.domain)}">${incomeCell(d)}</td>
+          <td>${noteBtn(d.domain)}</td></tr>
+          <tr class="note-row hidden" data-for="${h(d.domain)}"><td colspan="5"></td></tr>`;
       }).join('')}
     </tbody></table></div>
     ${sectionHead('Change log')}
@@ -427,10 +448,75 @@ async function viewPrices() {
     </tbody></table></div>` : '<div class="empty">No price has been changed yet.</div>'}`;
 
   const filter = () => {
-    const q = $('#p-q').value.toLowerCase(), t = $('#p-tenant').value, unset = $('#p-show').value === 'unset';
-    view().querySelectorAll('#p-table tbody tr').forEach(tr => tr.classList.toggle('hidden',
-      (q && !tr.dataset.row.includes(q)) || (t && !tr.dataset.tenants.split('|').includes(t)) || (unset && tr.dataset.unset !== '1')));
+    const q = $('#p-q').value.toLowerCase(), t = $('#p-tenant').value, show = $('#p-show').value;
+    view().querySelectorAll('#p-table tbody tr[data-row]').forEach(tr => {
+      const hide = (q && !tr.dataset.row.includes(q)) || (t && !tr.dataset.tenants.split('|').includes(t)) ||
+        (show === 'unset' && tr.dataset.unset !== '1') || (show === 'open' && tr.dataset.open !== '1') || (show === 'mine' && tr.dataset.mine !== '1');
+      tr.classList.toggle('hidden', hide);
+      const nrow = tr.nextElementSibling;
+      if (hide) nrow.classList.add('hidden');
+    });
   };
+
+  // Notes: a thread under the domain's row.
+  const mention = text => h(text).replace(/@([a-z0-9._-]+)/gi, (m, u) => pr.people.some(x => x.username === u.toLowerCase()) ? `<span class="mention">@${h(u)}</span>` : m);
+  const thread = d => {
+    const list = (notesBy.get(d) || []).slice().reverse();
+    return `<div class="thread">
+      ${list.length ? list.map(x => `<div class="note${x.resolved_at ? ' done' : ''}${!x.resolved_at && x.mentions.includes(me) ? ' for-me' : ''}">
+        <div class="meta"><strong>${h(x.author)}</strong> · ${h(when(x.created_at))}${x.resolved_at ? ` · done by ${h(x.resolved_by)} ${h(when(x.resolved_at))}` : ''}
+          ${can('prices') ? `<button type="button" class="linkish small" data-resolve="${x.id}" data-to="${x.resolved_at ? 0 : 1}">${x.resolved_at ? 'Reopen' : 'Mark done'}</button>` : ''}</div>
+        <div class="body">${mention(x.body).replace(/\n/g, '<br>')}</div></div>`).join('') : '<p class="small muted">No notes on this domain yet.</p>'}
+      ${can('prices') ? `<div class="add-note">
+        <textarea rows="2" maxlength="2000" placeholder="Write a note, e.g. “@accountant client pays yearly, invoice in January”" aria-label="New note on ${h(d)}"></textarea>
+        <div class="mention-bar small muted">Mention: ${pr.people.filter(x => x.username !== me).map(x => `<button type="button" class="chip mention-pick" data-user="${h(x.username)}" title="${h(x.name || x.username)} · ${h(x.role)}">@${h(x.username)}</button>`).join('') || 'no other users yet'}</div>
+        <button type="button" class="btn small" data-add-note="${h(d)}">Add note</button> <span class="error small"></span>
+      </div>` : ''}
+    </div>`;
+  };
+  const openThread = d => {
+    const row = view().querySelector(`tr.note-row[data-for="${CSS.escape(d)}"]`);
+    row.firstElementChild.innerHTML = thread(d);
+    row.classList.remove('hidden');
+    view().querySelector(`[data-notes="${CSS.escape(d)}"]`).setAttribute('aria-expanded', 'true');
+    bindThread(row, d);
+  };
+  const refreshRow = d => {
+    const btn = view().querySelector(`[data-notes="${CSS.escape(d)}"]`);
+    btn.outerHTML = noteBtn(d);
+    const tr = view().querySelector(`tr[data-row="${CSS.escape(d)}"]`);
+    tr.dataset.open = openOf(d).length ? 1 : 0;
+    tr.dataset.mine = forMe(d) ? 1 : 0;
+    view().querySelector(`[data-notes="${CSS.escape(d)}"]`).addEventListener('click', toggle);
+  };
+  const bindThread = (row, d) => {
+    const ta = row.querySelector('textarea');
+    row.querySelectorAll('.mention-pick').forEach(b => b.addEventListener('click', () => {
+      ta.value = `${ta.value}${ta.value && !/\s$/.test(ta.value) ? ' ' : ''}@${b.dataset.user} `;
+      ta.focus();
+    }));
+    row.querySelector('[data-add-note]')?.addEventListener('click', async e => {
+      const err = e.target.parentElement.querySelector('.error');
+      try {
+        const { note } = await api('/api/notes', { method: 'POST', body: { domain: d, body: ta.value } });
+        (notesBy.get(d) || notesBy.set(d, []).get(d)).unshift(note);
+        refreshRow(d); openThread(d); refreshNoteBadge();
+      } catch (x) { err.textContent = x.message; }
+    });
+    row.querySelectorAll('[data-resolve]').forEach(b => b.addEventListener('click', async () => {
+      await api(`/api/notes/${b.dataset.resolve}/resolve`, { method: 'POST', body: { resolved: b.dataset.to === '1' } });
+      const x = notesBy.get(d).find(y => y.id === Number(b.dataset.resolve));
+      if (b.dataset.to === '1') { x.resolved_at = new Date().toISOString(); x.resolved_by = me; } else { x.resolved_at = x.resolved_by = null; }
+      refreshRow(d); openThread(d); refreshNoteBadge();
+    }));
+  };
+  function toggle(e) {
+    const d = e.currentTarget.dataset.notes;
+    const row = view().querySelector(`tr.note-row[data-for="${CSS.escape(d)}"]`);
+    if (row.classList.contains('hidden')) openThread(d);
+    else { row.classList.add('hidden'); e.currentTarget.setAttribute('aria-expanded', 'false'); }
+  }
+  view().querySelectorAll('[data-notes]').forEach(b => b.addEventListener('click', toggle));
   ['#p-q', '#p-tenant', '#p-show'].forEach(id => $(id).addEventListener(id === '#p-q' ? 'input' : 'change', filter));
   view().querySelectorAll('.price-input').forEach(inp => {
     inp.dataset.orig = inp.value;

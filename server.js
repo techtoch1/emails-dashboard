@@ -160,6 +160,36 @@ function createApp(db, { clientFactory } = {}) {
       res.status(400).json({ error: /zip|End of data|Corrupted/i.test(e.message) ? 'That file could not be read as Excel (.xlsx) or CSV' : e.message });
     }
   });
+  // ---- notes on domains (Prices page) -------------------------------------
+  const noteOut = n => ({ ...n, mentions: JSON.parse(n.mentions) });
+  app.get('/api/people', can('view'), (req, res) => {
+    res.json({ people: db.prepare('SELECT username, name, role FROM users ORDER BY username').all() });
+  });
+  app.get('/api/notes', can('view'), (req, res) => {
+    const notes = db.prepare('SELECT * FROM notes ORDER BY id DESC LIMIT 2000').all().map(noteOut);
+    const mine = notes.filter(n => !n.resolved_at && n.mentions.includes(req.user.username)).length;
+    res.json({ notes, mine });
+  });
+  app.post('/api/notes', can('prices'), (req, res) => {
+    const domain = String(req.body?.domain || '').toLowerCase().trim();
+    const body = String(req.body?.body || '').trim();
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+    if (!body) return res.status(400).json({ error: 'Write a note first' });
+    if (body.length > 2000) return res.status(400).json({ error: 'Keep a note under 2000 characters' });
+    const known = new Set(db.prepare('SELECT username FROM users').all().map(u => u.username));
+    const mentions = [...new Set([...body.matchAll(/@([a-z0-9._-]+)/gi)].map(m => m[1].toLowerCase()).filter(u => known.has(u)))];
+    const id = db.prepare('INSERT INTO notes (domain, body, mentions, author, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(domain, body, JSON.stringify(mentions), req.user.username, new Date().toISOString()).lastInsertRowid;
+    res.json({ note: noteOut(db.prepare('SELECT * FROM notes WHERE id = ?').get(id)) });
+  });
+  app.post('/api/notes/:id/resolve', can('prices'), (req, res) => {
+    const done = req.body?.resolved !== false;
+    const r = db.prepare('UPDATE notes SET resolved_by = ?, resolved_at = ? WHERE id = ?')
+      .run(done ? req.user.username : null, done ? new Date().toISOString() : null, Number(req.params.id));
+    if (!r.changes) return res.status(404).json({ error: 'No such note' });
+    res.json({ ok: true });
+  });
+
   app.get('/api/prices/log', can('view'), (req, res) => {
     res.json({ log: db.prepare('SELECT * FROM price_log ORDER BY id DESC LIMIT 200').all() });
   });

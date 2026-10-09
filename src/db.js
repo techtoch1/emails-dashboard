@@ -123,6 +123,20 @@ CREATE TABLE IF NOT EXISTS price_log (
   changed_at TEXT NOT NULL
 );
 
+-- Notes on a domain's pricing, e.g. for the accountant. @username mentions
+-- are stored so each user can see the open notes that mention them.
+CREATE TABLE IF NOT EXISTS notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain      TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  mentions    TEXT NOT NULL DEFAULT '[]',  -- JSON array of usernames
+  author      TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  resolved_by TEXT,
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notes_domain ON notes(domain);
+
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS users (
