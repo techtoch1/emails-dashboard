@@ -96,7 +96,7 @@ test('price import: preview writes nothing, apply saves, viewers cannot import',
   assert.equal(db.prepare("SELECT price FROM prices WHERE domain = 'client.example'").get().price, 9);
 });
 
-test('notes on a domain: mentions known users, counts open ones per user, viewers read only', async t => {
+test('notes on a domain: mentions known users, counts open ones per user, not for viewers', async t => {
   const { server, as } = await start();
   t.after(() => server.close());
   const admin = await as('admin'), accountant = await as('accountant'), viewer = await as('viewer');
@@ -106,7 +106,7 @@ test('notes on a domain: mentions known users, counts open ones per user, viewer
   assert.equal((await (await accountant('/api/notes')).json()).mine, 1);
   assert.equal((await (await admin('/api/notes')).json()).mine, 0);
   assert.equal((await viewer('/api/notes', { method: 'POST', body: { domain: 'client.example', body: 'hi' } })).status, 403);
-  assert.equal((await viewer('/api/notes')).status, 200);
+  assert.equal((await viewer('/api/notes')).status, 403, 'notes are about prices: not for viewers');
   await accountant(`/api/notes/${note.id}/resolve`, { method: 'POST', body: { resolved: true } });
   const after = await (await accountant('/api/notes')).json();
   assert.equal(after.mine, 0);
@@ -122,4 +122,23 @@ test('a price of 0 means no price: saving 0 clears it', async t => {
   assert.equal((await acc('/api/prices', { method: 'PUT', body: { domain: 'client.example', price: 0 } })).status, 200);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM prices').get().n, 0);
   assert.equal(db.prepare('SELECT new_price FROM price_log ORDER BY id DESC LIMIT 1').get().new_price, null);
+});
+
+test('viewers never receive prices or income, in JSON or in exports', async t => {
+  const { db, server, as } = await start();
+  t.after(() => server.close());
+  const id = db.prepare("INSERT INTO tenants (label, admin_email, created_at) VALUES ('T', 'a@t.example', 'x')").run().lastInsertRowid;
+  db.prepare("INSERT INTO tenant_snapshots (tenant_id, date, synced_at, domains, seats) VALUES (?, '2026-10-09', 'x', '[]', '{}')").run(id);
+  db.prepare("INSERT INTO account_snapshots (tenant_id, date, email, domain, status, sku) VALUES (?, '2026-10-09', 'u@client.example', 'client.example', 'active', 'Business Starter')").run(id);
+  db.prepare("INSERT INTO prices (domain, sku, price, updated_at) VALUES ('client.example', '*', 6, 'x')").run();
+  const viewer = await as('viewer'), acc = await as('accountant');
+
+  const vText = JSON.stringify(await (await viewer('/api/overview')).json()) + JSON.stringify(await (await viewer('/api/accounts')).json())
+    + JSON.stringify(await (await viewer('/api/billing?period=month&key=2026-10')).json()) + JSON.stringify(await (await viewer('/api/changes')).json());
+  assert.doesNotMatch(vText, /monthly_cost|"price"|"cost"|"income"|"total"|currency/);
+  assert.match(JSON.stringify(await (await acc('/api/overview')).json()), /"monthly_cost":6/);
+
+  for (const path of ['/api/prices', '/api/prices/log', '/api/notes', '/api/billing.csv']) assert.equal((await viewer(path)).status, 403, path);
+  assert.doesNotMatch(await (await viewer('/api/accounts.csv')).text(), /Monthly income/);
+  assert.match(await (await acc('/api/accounts.csv')).text(), /Monthly income/);
 });

@@ -29,6 +29,9 @@ function sectionHead(title, actions = '') {
   return `<div class="section-head"><h2>${h(title)}</h2><span class="rule" aria-hidden="true"></span>${actions ? `<div class="actions">${actions}</div>` : ''}</div>`;
 }
 const can = cap => state.me?.can.includes(cap);
+// Prices and income are for admins and accountants only; M() drops a piece
+// of markup for everyone else (the server leaves the numbers out too).
+const M = html => can('money') ? html : '';
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -90,6 +93,7 @@ async function boot() {
 
 // Count of open notes that mention the signed-in user, on the Prices tab.
 async function refreshNoteBadge() {
+  if (!can('money')) return;
   const r = await api('/api/notes').catch(() => null);
   const tab = document.querySelector('#tabs button[data-view="prices"]');
   if (!r || !tab) return;
@@ -134,14 +138,14 @@ async function viewOverview() {
       ${kpi('Licensed', n(t.licensed), t.hidden ? `${n(t.hidden)} accounts with no Workspace license not counted` : 'every account has a license')}
       ${kpi('Domains', n(t.domains), `across ${n(t.tenants)} tenant${t.tenants === 1 ? '' : 's'}`)}
       ${kpi('Storage used', gb(t.storage_gb), 'Gmail + Drive + Photos')}
-      ${kpi('Monthly income', money(t.monthly_cost, o.currency), t.unpriced_accounts ? `${n(t.unpriced_accounts)} accounts have no price` : 'every account priced', !!t.unpriced_accounts)}
+      ${M(kpi('Monthly income', money(t.monthly_cost, o.currency), t.unpriced_accounts ? `${n(t.unpriced_accounts)} accounts have no price` : 'every account priced', !!t.unpriced_accounts))}
     </div>
     ${snapDates.length ? `<p class="small muted">Accounts as of ${h(snapDates[0])}${snapDates[0] !== snapDates.at(-1) ? `–${h(snapDates.at(-1))}` : ''}. Storage comes from Google's usage report, which runs 2–4 days behind.</p>` : ''}
     ${sectionHead('Tenants')}
     <div class="tenant-grid">${o.tenants.map(tenantCard).join('')}</div>
     ${sectionHead('Domains', `<input type="search" id="dom-q" placeholder="Find a domain" aria-label="Find a domain">`)}
     <div class="table-wrap"><table id="dom-table">
-      <thead><tr><th>Domain</th><th>Hosted on</th><th class="num">Emails</th><th class="num">Active</th><th class="num">Suspended</th><th>Licenses</th><th class="num">Storage</th><th class="num">Price / email</th><th class="num">Monthly income</th></tr></thead>
+      <thead><tr><th>Domain</th><th>Hosted on</th><th class="num">Emails</th><th class="num">Active</th><th class="num">Suspended</th><th>Licenses</th><th class="num">Storage</th>${M('<th class="num">Price / email</th><th class="num">Monthly income</th>')}</tr></thead>
       <tbody></tbody>
     </table></div>`;
   const body = $('#dom-table tbody');
@@ -154,8 +158,8 @@ async function viewOverview() {
       <td class="num">${n(d.accounts)}</td><td class="num">${n(d.active)}</td><td class="num">${d.suspended ? n(d.suspended) : ''}</td>
       <td>${Object.entries(d.licenses).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="chip">${h(skuShort(k))} × ${n(v)}</span>`).join('')}</td>
       <td class="num">${gb(d.storage_gb)}</td>
-      <td class="num">${d.price == null ? '<span class="notset">not set</span>' : money(d.price, o.currency)}</td>
-      <td class="num">${d.unpriced && !d.monthly_cost ? '<span class="notset">no price</span>' : money(d.monthly_cost, o.currency)}${d.unpriced && d.monthly_cost ? `<div class="small notset">${n(d.unpriced)} unpriced</div>` : ''}</td>
+      ${M(`<td class="num">${d.price == null ? '<span class="notset">not set</span>' : money(d.price, o.currency)}</td>
+      <td class="num">${d.unpriced && !d.monthly_cost ? '<span class="notset">no price</span>' : money(d.monthly_cost, o.currency)}${d.unpriced && d.monthly_cost ? `<div class="small notset">${n(d.unpriced)} unpriced</div>` : ''}</td>`)}
     </tr>`).join('') || '<tr><td colspan="9" class="muted">No domain matches.</td></tr>';
     body.querySelectorAll('[data-domain]').forEach(b => b.addEventListener('click', () => go('accounts', { domain: b.dataset.domain })));
   };
@@ -175,7 +179,7 @@ function tenantCard(t) {
     ${t.hidden ? `<div class="row muted"><span>Not counted (no Workspace license)</span><span class="num">${n(t.hidden)}</span></div>` : ''}
     <div class="row"><span>Storage (accounts)</span><span class="num">${gb(t.storage_gb)}</span></div>
     ${t.pooled_total_gb ? `<div class="row"><span>Pooled storage</span><span class="num">${gb(t.pooled_used_gb)} of ${gb(t.pooled_total_gb)}</span></div>` : ''}
-    <div class="row"><span>Monthly income</span><span class="num">${money(t.monthly_cost, state.overview.currency)}</span></div>
+    ${M(`<div class="row"><span>Monthly income</span><span class="num">${money(t.monthly_cost, state.overview.currency)}</span></div>`)}
     ${lic}
     <div class="sync">${s ? `${s.ok ? '<span class="ok">Synced</span>' : '<span class="bad">Sync failed</span>'} ${h(when(s.at))}${s.error ? `<div class="bad">${h(s.error)}</div>` : ''}${s.warnings?.length ? `<div class="small" style="color:var(--warn-fg)">${s.warnings.length} warning${s.warnings.length === 1 ? '' : 's'} — see Tenants</div>` : ''}` : '<span class="muted">Not synced yet</span>'}</div>
   </article>`;
@@ -188,6 +192,7 @@ const ACCOUNT_COLS = [
   ['gmail_gb', 'Gmail', 'num'], ['drive_gb', 'Drive', 'num'], ['total_gb', 'Total storage', 'num'],
   ['last_active', 'Last activity'], ['created_on', 'Created'], ['monthly_cost', 'Monthly income', 'num'],
 ];
+const accountCols = () => ACCOUNT_COLS.filter(c => c[0] !== 'monthly_cost' || can('money'));
 async function viewAccounts() {
   const [rows, o] = await Promise.all([getAccounts(), getOverview()]);
   const uniq = k => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
@@ -208,7 +213,7 @@ async function viewAccounts() {
     </div>
     <p class="count" id="acc-count"></p>
     <div class="table-wrap"><table>
-      <thead><tr>${ACCOUNT_COLS.map(([k, l, c]) => `<th class="sortable ${c || ''}" data-col="${k}" aria-sort="none">${h(l)}</th>`).join('')}</tr></thead>
+      <thead><tr>${accountCols().map(([k, l, c]) => `<th class="sortable ${c || ''}" data-col="${k}" aria-sort="none">${h(l)}</th>`).join('')}</tr></thead>
       <tbody id="acc-body"></tbody><tfoot id="acc-foot"></tfoot>
     </table></div>`;
   if (f.login) $('#f-login').value = f.login;
@@ -243,12 +248,12 @@ async function viewAccounts() {
       <td class="num">${gb(r.gmail_gb)}</td><td class="num">${gb(r.drive_gb)}</td><td class="num">${gb(r.total_gb)}</td>
       <td title="Password sign-in: ${h(r.last_login ? day(r.last_login) : 'never')}">${r.last_active ? `${h(day(r.last_active))}<div class="small muted">${h(ago(r.last_active))}</div>` : '<span class="muted">Never</span>'}</td>
       <td>${h(day(r.created_on))}</td>
-      <td class="num">${r.monthly_cost === 0 ? money(0, o.currency) : money(r.monthly_cost, o.currency)}</td>
-    </tr>`).join('') || `<tr><td colspan="${ACCOUNT_COLS.length}" class="muted">No account matches these filters.</td></tr>`;
+      ${M(`<td class="num">${r.monthly_cost === 0 ? money(0, o.currency) : money(r.monthly_cost, o.currency)}</td>`)}
+    </tr>`).join('') || `<tr><td colspan="${accountCols().length}" class="muted">No account matches these filters.</td></tr>`;
     const sumOf = k => list.reduce((s, r) => s + (r[k] || 0), 0);
     $('#acc-foot').innerHTML = list.length ? `<tr><td colspan="5">Total${list.length > shown.length ? ` (table shows the first ${n(shown.length)})` : ''}</td>
       <td class="num">${gb(sumOf('gmail_gb'))}</td><td class="num">${gb(sumOf('drive_gb'))}</td><td class="num">${gb(sumOf('total_gb'))}</td>
-      <td colspan="2"></td><td class="num">${money(Math.round(sumOf('monthly_cost') * 100) / 100, o.currency)}</td></tr>` : '';
+      <td colspan="2"></td>${M(`<td class="num">${money(Math.round(sumOf('monthly_cost') * 100) / 100, o.currency)}</td>`)}</tr>` : '';
   };
   const bind = (id, key) => $(id).addEventListener(id === '#f-q' ? 'input' : 'change', e => { f[key] = e.target.value || undefined; draw(); });
   $('#f-all').addEventListener('change', e => { state.showAll = e.target.checked; state.accounts = null; render(); });
@@ -258,8 +263,8 @@ async function viewAccounts() {
     draw();
   }));
   $('#acc-export').addEventListener('click', () => downloadCsv(`accounts-${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Email', 'Name', 'Domain', 'Tenant', 'License', 'Other licenses', 'Status', 'Gmail GB', 'Drive GB', 'Photos GB', 'Total GB', 'Last activity', 'Last password sign-in', 'Created', 'Org unit', `Monthly income (${o.currency})`],
-    filtered().map(r => [r.email, r.full_name, r.domain, r.tenant, r.sku, r.extra_skus, r.status, r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_active ? day(r.last_active) : 'Never', r.last_login ? day(r.last_login) : 'Never', day(r.created_on), r.org_unit, r.monthly_cost])));
+    ['Email', 'Name', 'Domain', 'Tenant', 'License', 'Other licenses', 'Status', 'Gmail GB', 'Drive GB', 'Photos GB', 'Total GB', 'Last activity', 'Last password sign-in', 'Created', 'Org unit', ...(can('money') ? [`Monthly income (${o.currency})`] : [])],
+    filtered().map(r => [r.email, r.full_name, r.domain, r.tenant, r.sku, r.extra_skus, r.status, r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_active ? day(r.last_active) : 'Never', r.last_login ? day(r.last_login) : 'Never', day(r.created_on), r.org_unit, ...(can('money') ? [r.monthly_cost] : [])])));
   draw();
 }
 
@@ -310,10 +315,10 @@ async function viewChanges() {
       ${Object.entries(byDomain).sort((a, b) => a[0].localeCompare(b[0])).map(([d, v]) => `<tr><td>${h(d)}</td><td>${h(v.tenant)}</td><td class="num">${n(v.created)}</td><td class="num">${n(v.deleted)}</td><td class="num">${v.created - v.deleted > 0 ? '+' : ''}${n(v.created - v.deleted)}</td></tr>`).join('')}
     </tbody></table></div>` : ''}
     ${sectionHead('Accounts')}
-    ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Change</th><th>Email</th><th>Domain</th><th>Tenant</th><th>License</th><th class="num">Monthly income</th><th>By</th><th>Source</th></tr></thead><tbody>
+    ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Change</th><th>Email</th><th>Domain</th><th>Tenant</th><th>License</th>${M('<th class="num">Monthly income</th>')}<th>By</th><th>Source</th></tr></thead><tbody>
       ${r.rows.map(x => `<tr><td>${h(x.date)}</td><td><span class="chip ${x.change}">${x.change}</span></td>
         <td>${h(x.email)}<div class="small muted">${h(x.full_name || '')}</div></td><td>${h(x.domain)}</td><td>${h(x.tenant)}</td>
-        <td>${h(skuShort(x.sku) || '—')}</td><td class="num">${x.sku ? money(x.monthly_cost, o.currency) : '—'}</td><td>${h(x.by || '—')}</td><td class="small muted">${h(x.source)}</td></tr>`).join('')}
+        <td>${h(skuShort(x.sku) || '—')}</td>${M(`<td class="num">${x.sku ? money(x.monthly_cost, o.currency) : '—'}</td>`)}<td>${h(x.by || '—')}</td><td class="small muted">${h(x.source)}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">No account was created or deleted in this period.</div>'}
     <p class="small muted">Created dates are Google's own account creation time. Deleted dates come from the admin audit log when Google reported the deletion; otherwise they are the first daily sync that no longer found the account.</p>`;
   const set = (f, t) => { state.filters.from = f; state.filters.to = t; render(); };
@@ -341,13 +346,13 @@ async function viewBilling() {
     : period === 'month' ? `<input type="month" id="b-key" value="${key}" aria-label="Month">`
     : `<select id="b-key" aria-label="Year">${[0, 1, 2, 3, 4].map(i => thisYear - i).map(y => `<option${String(y) === key ? ' selected' : ''}>${y}</option>`).join('')}</select>`;
   const changesSection = `${sectionHead('Emails added and removed')}
-    ${r.changes.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Change</th><th>Email</th><th>Domain</th><th>Tenant</th><th>License</th><th class="num">Price / month</th><th>By</th></tr></thead><tbody>
+    ${r.changes.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Change</th><th>Email</th><th>Domain</th><th>Tenant</th><th>License</th>${M('<th class="num">Price / month</th>')}<th>By</th></tr></thead><tbody>
       ${r.changes.map(x => `<tr><td>${h(x.date)}</td><td><span class="chip ${x.change}">${x.change === 'created' ? 'added' : 'removed'}</span></td>
         <td>${h(x.email)}<div class="small muted">${h(x.full_name || '')}</div></td><td>${h(x.domain)}</td><td>${h(x.tenant)}</td>
-        <td>${h(skuShort(x.sku) || '—')}</td><td class="num">${x.sku ? money(x.monthly_cost, cur) : '—'}</td><td class="small">${h(x.by || x.source || '—')}</td></tr>`).join('')}
+        <td>${h(skuShort(x.sku) || '—')}</td>${M(`<td class="num">${x.sku ? money(x.monthly_cost, cur) : '—'}</td>`)}<td class="small">${h(x.by || x.source || '—')}</td></tr>`).join('')}
     </tbody></table></div>` : `<div class="empty">No email was added or removed ${period === 'day' ? 'on' : 'in'} ${h(label)}.</div>`}`;
   view().innerHTML = `
-    ${sectionHead('Billing report', `<a class="btn secondary" href="/api/changes.csv?from=${r.start}&to=${r.end}">Added &amp; removed (CSV)</a><a class="btn secondary" href="/api/billing.csv?period=${period}&key=${key}">Income per email (CSV)</a>`)}
+    ${sectionHead('Billing report', `<a class="btn secondary" href="/api/changes.csv?from=${r.start}&to=${r.end}">Added &amp; removed (CSV)</a>${M(`<a class="btn secondary" href="/api/billing.csv?period=${period}&key=${key}">Income per email (CSV)</a>`)}`)}
     <div class="filters">
       <div class="seg" role="group" aria-label="Report period">${['day', 'month', 'year'].map(p => `<button type="button" data-period="${p}" aria-pressed="${p === period}">${{ day: 'Daily', month: 'Monthly', year: 'Yearly' }[p]}</button>`).join('')}</div>
       ${picker}
@@ -355,9 +360,9 @@ async function viewBilling() {
     ${r.projected ? `<div class="note">${h(label)} is not over yet: days after the latest sync are projected from the accounts as they are now.</div>` : ''}
     ${r.covered_from && r.covered_from > r.start ? `<div class="banner">Sync history starts on ${h(r.covered_from)}, so days before that are not counted in this report.</div>` : ''}
     ${!r.covered_from ? '<div class="empty" style="margin-top:16px">No sync covers this period yet.</div>' : ''}
-    ${r.unpriced_accounts ? `<div class="banner">${n(r.unpriced_accounts)} email${r.unpriced_accounts === 1 ? ' has' : 's have'} no price, so the income below leaves ${r.unpriced_accounts === 1 ? 'it' : 'them'} out. Set prices under <button class="linkish" data-go="prices">Prices</button>.</div>` : ''}
+    ${can('money') && r.unpriced_accounts ? `<div class="banner">${n(r.unpriced_accounts)} email${r.unpriced_accounts === 1 ? ' has' : 's have'} no price, so the income below leaves ${r.unpriced_accounts === 1 ? 'it' : 'them'} out. Set prices under <button class="linkish" data-go="prices">Prices</button>.</div>` : ''}
     <div class="kpis">
-      ${kpi(`Income · ${label}`, money(r.total, cur), period === 'day' ? 'one day of each monthly price' : 'prorated by day, like Google’s Flexible plan')}
+      ${M(kpi(`Income · ${label}`, money(r.total, cur), period === 'day' ? 'one day of each monthly price' : 'prorated by day, like Google’s Flexible plan'))}
       ${kpi('Emails at period end', n(r.emails_at_end), r.projected ? 'projected' : `on ${r.end}`)}
       ${kpi('Added', n(added.length), label)}
       ${kpi('Removed', n(removed.length), label)}
@@ -365,18 +370,18 @@ async function viewBilling() {
 
     ${period === 'year' ? '' : changesSection}
     ${period === 'year' ? `${sectionHead('By month')}
-    <div class="table-wrap"><table><thead><tr><th>Month</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Income</th></tr></thead><tbody>
-      ${r.months.map(m => `<tr><td><button class="linkish" data-month="${m.month}">${h(periodLabel('month', m.month))}</button></td><td class="num">${m.added ? n(m.added) : ''}</td><td class="num">${m.removed ? n(m.removed) : ''}</td><td class="num">${money(m.income, cur)}</td></tr>`).join('')}
-    </tbody><tfoot><tr><td>Total</td><td class="num">${n(added.length)}</td><td class="num">${n(removed.length)}</td><td class="num">${money(r.total, cur)}</td></tr></tfoot></table></div>` : ''}
+    <div class="table-wrap"><table><thead><tr><th>Month</th><th class="num">Added</th><th class="num">Removed</th>${M('<th class="num">Income</th>')}</tr></thead><tbody>
+      ${r.months.map(m => `<tr><td><button class="linkish" data-month="${m.month}">${h(periodLabel('month', m.month))}</button></td><td class="num">${m.added ? n(m.added) : ''}</td><td class="num">${m.removed ? n(m.removed) : ''}</td>${M(`<td class="num">${money(m.income, cur)}</td>`)}</tr>`).join('')}
+    </tbody><tfoot><tr><td>Total</td><td class="num">${n(added.length)}</td><td class="num">${n(removed.length)}</td>${M(`<td class="num">${money(r.total, cur)}</td>`)}</tr></tfoot></table></div>` : ''}
 
     ${sectionHead('By domain')}
-    <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Emails at end</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Email-days</th><th class="num">Income</th></tr></thead><tbody>
+    <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Emails at end</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Email-days</th>${M('<th class="num">Income</th>')}</tr></thead><tbody>
       ${r.domains.map(d => `<tr><td>${h(d.domain)}</td><td>${d.tenants.map(h).join(', ')}</td><td class="num">${n(d.at_end)}</td>
         <td class="num">${d.created ? n(d.created) : ''}</td><td class="num">${d.deleted ? n(d.deleted) : ''}</td><td class="num">${n(d.license_days)}</td>
-        <td class="num">${d.unpriced && !d.cost ? '<span class="notset">no price</span>' : money(d.cost, cur)}</td></tr>`).join('')}
-    </tbody><tfoot><tr><td colspan="6">Total</td><td class="num">${money(r.total, cur)}</td></tr></tfoot></table></div>
+        ${M(`<td class="num">${d.unpriced && !d.cost ? '<span class="notset">no price</span>' : money(d.cost, cur)}</td>`)}</tr>`).join('')}
+    </tbody>${M(`<tfoot><tr><td colspan="6">Total</td><td class="num">${money(r.total, cur)}</td></tr></tfoot>`)}</table></div>
     ${period === 'year' ? changesSection : ''}
-    <p class="small muted">Income per email = monthly price × days it held a license ÷ days in that month. Suspended emails still hold their license, so they count; emails without a Workspace license do not.</p>`;
+    ${M(`<p class="small muted">Income per email = monthly price × days it held a license ÷ days in that month. Suspended emails still hold their license, so they count; emails without a Workspace license do not.</p>`)}`;
   view().querySelectorAll('[data-period]').forEach(b => b.addEventListener('click', () => { state.filters.bperiod = b.dataset.period; render(); }));
   $('#b-key').addEventListener('change', e => { if (e.target.value) { state.filters[`bkey_${period}`] = e.target.value; render(); } });
   view().querySelectorAll('[data-month]').forEach(b => b.addEventListener('click', () => { state.filters.bperiod = 'month'; state.filters.bkey_month = b.dataset.month; render(); }));
@@ -683,7 +688,7 @@ async function viewUsers() {
         <label>Role <select name="role">${r.roles.map(x => `<option${x === 'accountant' ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
         <label>Password (min 10 characters) <input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
       </div>
-      <p class="small muted">Admin: everything. Accountant: sees everything, sets prices and can sync now. Viewer: read-only.</p>
+      <p class="small muted">Admin: everything. Accountant: sees everything, sets prices and can sync now. Viewer: read-only, and sees no prices or income.</p>
       <p class="error" id="u-err"></p>
       <button class="btn" type="submit">Add user</button>
     </form>`;

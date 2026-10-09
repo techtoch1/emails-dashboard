@@ -33,6 +33,22 @@ function createApp(db, { clientFactory } = {}) {
   app.use(express.static(path.join(__dirname, 'public')));
 
   const can = auth.requireCan;
+
+  // Viewers never receive prices or income: every JSON answer is scrubbed of
+  // money fields for a user without the 'money' capability, so no screen or
+  // browser tool can show them.
+  const MONEY_KEYS = new Set(['monthly_cost', 'price', 'cost', 'total', 'income', 'unpriced', 'unpriced_accounts', 'currency']);
+  const scrub = v => Array.isArray(v) ? v.map(scrub)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([k]) => !MONEY_KEYS.has(k)).map(([k, x]) => [k, scrub(x)]))
+    : v;
+  app.use('/api', (req, res, next) => {
+    if (req.user && !req.user.can.includes('money')) {
+      const json = res.json.bind(res);
+      res.json = body => json(scrub(body));
+    }
+    next();
+  });
+  const moneyCols = (req, cols) => req.user.can.includes('money') ? cols : cols.filter(c => !MONEY_KEYS.has(c.key));
   const syncOpts = clientFactory ? { clientFactory } : {};
 
   // ---- session -----------------------------------------------------------
@@ -77,7 +93,7 @@ function createApp(db, { clientFactory } = {}) {
   ];
   app.get('/api/accounts', can('view'), (req, res) => res.json({ accounts: reports.currentAccounts(db, { all: req.query.all === '1' }) }));
   app.get('/api/accounts.csv', can('view'), (req, res) => {
-    sendCsv(res, `accounts-${sync.today()}.csv`, reports.toCsv(ACCOUNT_COLS, reports.currentAccounts(db, { all: req.query.all === '1' })));
+    sendCsv(res, `accounts-${sync.today()}.csv`, reports.toCsv(moneyCols(req, ACCOUNT_COLS), reports.currentAccounts(db, { all: req.query.all === '1' })));
   });
 
   function range(req) {
@@ -94,7 +110,7 @@ function createApp(db, { clientFactory } = {}) {
   app.get('/api/changes', can('view'), (req, res) => res.json(reports.changes(db, ...range(req))));
   app.get('/api/changes.csv', can('view'), (req, res) => {
     const [from, to] = range(req);
-    sendCsv(res, `created-deleted-${from}-to-${to}.csv`, reports.toCsv(CHANGE_COLS, reports.changes(db, from, to).rows));
+    sendCsv(res, `created-deleted-${from}-to-${to}.csv`, reports.toCsv(moneyCols(req, CHANGE_COLS), reports.changes(db, from, to).rows));
   });
 
   // Billing report period: ?period=day&key=2026-10-09 | month&key=2026-10 | year&key=2026
@@ -106,7 +122,7 @@ function createApp(db, { clientFactory } = {}) {
     return [p, re.test(req.query.key) ? req.query.key : dflt];
   }
   app.get('/api/billing', can('view'), (req, res) => res.json(reports.billing(db, ...period(req))));
-  app.get('/api/billing.csv', can('view'), (req, res) => {
+  app.get('/api/billing.csv', can('money'), (req, res) => {
     const [p, key] = period(req);
     const cols = [
       { key: 'domain', label: 'Domain' }, { key: 'tenant', label: 'Tenant' }, { key: 'email', label: 'Email' }, { key: 'full_name', label: 'Name' },
@@ -117,7 +133,7 @@ function createApp(db, { clientFactory } = {}) {
   });
 
   // ---- prices (accountant) ----------------------------------------------
-  app.get('/api/prices', can('view'), (req, res) => {
+  app.get('/api/prices', can('money'), (req, res) => {
     const ov = reports.overview(db);
     const prices = db.prepare('SELECT * FROM prices ORDER BY domain, sku').all();
     res.json({ currency: ov.currency, domains: ov.domains, prices });
@@ -164,10 +180,10 @@ function createApp(db, { clientFactory } = {}) {
   });
   // ---- notes on domains (Prices page) -------------------------------------
   const noteOut = n => ({ ...n, mentions: JSON.parse(n.mentions) });
-  app.get('/api/people', can('view'), (req, res) => {
+  app.get('/api/people', can('money'), (req, res) => {
     res.json({ people: db.prepare('SELECT username, name, role FROM users ORDER BY username').all() });
   });
-  app.get('/api/notes', can('view'), (req, res) => {
+  app.get('/api/notes', can('money'), (req, res) => {
     const notes = db.prepare('SELECT * FROM notes ORDER BY id DESC LIMIT 2000').all().map(noteOut);
     const mine = notes.filter(n => !n.resolved_at && n.mentions.includes(req.user.username)).length;
     res.json({ notes, mine });
@@ -192,7 +208,7 @@ function createApp(db, { clientFactory } = {}) {
     res.json({ ok: true });
   });
 
-  app.get('/api/prices/log', can('view'), (req, res) => {
+  app.get('/api/prices/log', can('money'), (req, res) => {
     res.json({ log: db.prepare('SELECT * FROM price_log ORDER BY id DESC LIMIT 200').all() });
   });
   app.put('/api/settings/currency', can('prices'), (req, res) => {
