@@ -73,9 +73,9 @@ function createApp(db, { clientFactory } = {}) {
     { get: r => r.created_on ? r.created_on.slice(0, 10) : '', label: 'Created' },
     { key: 'org_unit', label: 'Org unit' }, { key: 'monthly_cost', label: 'Monthly cost' },
   ];
-  app.get('/api/accounts', can('view'), (req, res) => res.json({ accounts: reports.currentAccounts(db) }));
+  app.get('/api/accounts', can('view'), (req, res) => res.json({ accounts: reports.currentAccounts(db, { all: req.query.all === '1' }) }));
   app.get('/api/accounts.csv', can('view'), (req, res) => {
-    sendCsv(res, `accounts-${sync.today()}.csv`, reports.toCsv(ACCOUNT_COLS, reports.currentAccounts(db)));
+    sendCsv(res, `accounts-${sync.today()}.csv`, reports.toCsv(ACCOUNT_COLS, reports.currentAccounts(db, { all: req.query.all === '1' })));
   });
 
   function range(req) {

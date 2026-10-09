@@ -15,13 +15,14 @@ function defaultClientFactory(tenant) {
 // Products every account can hold at no charge. Google lists a Cloud Identity
 // Free license for each account, so it must never count as "the" license.
 const FREE_PRODUCTS = new Set(['101001']);
+const isFree = l => FREE_PRODUCTS.has(l.productId) || l.skuId === '1010010001' || /^cloud identity free$/i.test(l.sku || '');
 
 // Picks the license an account is billed on: the Workspace edition when it
 // has one, otherwise any other paid license. Free ones only show as extras;
 // an account holding nothing paid is 'Unlicensed'.
 function splitLicenses(list) {
   const all = list || [];
-  const paid = all.filter(l => !FREE_PRODUCTS.has(l.productId));
+  const paid = all.filter(l => !isFree(l));
   const main = paid.find(l => l.productId === 'Google-Apps') || paid[0];
   const extra = all.filter(l => l !== main).map(l => l.sku);
   return { sku: main ? main.sku : 'Unlicensed', extra: extra.length ? extra.join(', ') : null };

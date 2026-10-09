@@ -63,7 +63,7 @@ test('monthly billing prorates by the days an account existed', async () => {
   const cost = e => m.accounts.find(a => a.email === e).cost;
   assert.equal(cost('full@client.example'), 30);
   assert.equal(cost('half@client.example'), 15); // present 16th–30th = 15 of 30 days
-  assert.equal(cost('free@client.example'), 0);
+  assert.equal(m.accounts.find(a => a.email === 'free@client.example'), undefined, 'no Workspace license: not listed');
   assert.equal(m.total, 45);
   assert.equal(m.projected, false);
 });
@@ -95,4 +95,25 @@ test('a second tenant read through an admin of the first is refused, the first k
   assert.match(r.error, /already added as "First"/);
   assert.ok((await sync(first)).ok);
   assert.equal(reports.overview(db).totals.accounts, 1);
+});
+
+test('accounts with no Workspace license are left out of counts unless asked for', async () => {
+  const { db, run } = setup([
+    U('paid@client.example', '2026-01-10'),
+    U('ci@client.example', '2026-01-10', { sku: 'Cloud Identity Free' }),
+    U('none@client.example', '2026-01-10', { sku: null }),
+  ]);
+  await run('2026-03-01');
+  // Snapshots written before the license fix said "Cloud Identity Free"; they are hidden too.
+  assert.deepEqual(reports.currentAccounts(db).map(a => a.email), ['paid@client.example']);
+  assert.equal(reports.currentAccounts(db, { all: true }).length, 3);
+  const o = reports.overview(db);
+  assert.equal(o.totals.accounts, 1);
+  assert.equal(o.totals.hidden, 2);
+  assert.equal(o.domains.find(d => d.domain === 'client.example').accounts, 1);
+});
+
+test('Cloud Identity Free is recognised by its name even under another product id', () => {
+  const { splitLicenses } = require('../src/sync');
+  assert.equal(splitLicenses([{ productId: 'Google-Apps', skuId: '1010010001', sku: 'Cloud Identity Free' }]).sku, 'Unlicensed');
 });

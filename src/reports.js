@@ -2,6 +2,11 @@
 // Everything the screens show is computed here from the snapshots.
 
 const NOT_BILLED = new Set(['Unlicensed', 'Unknown', 'Cloud Identity Free']);
+// Accounts with no paid Workspace license have no mailbox you provide, so
+// they are left out of every count unless asked for. 'Unknown' (license not
+// readable) stays visible so a permission problem cannot hide accounts.
+const NO_WORKSPACE = new Set(['Unlicensed', 'Cloud Identity Free']);
+const isHidden = r => NO_WORKSPACE.has(r.sku);
 
 function loadPrices(db) {
   const m = new Map();
@@ -30,7 +35,7 @@ function latestDates(db) {
   return db.prepare('SELECT tenant_id, MAX(date) date FROM tenant_snapshots GROUP BY tenant_id').all();
 }
 
-function currentAccounts(db) {
+function currentAccounts(db, { all = false } = {}) {
   const tenants = tenantMap(db);
   const prices = loadPrices(db);
   const out = [];
@@ -39,6 +44,7 @@ function currentAccounts(db) {
     const t = tenants.get(tenant_id);
     if (!t || !t.enabled) continue;
     for (const r of stmt.all(tenant_id, date)) {
+      if (!all && isHidden(r)) continue;
       out.push({ ...r, tenant: t.label, snapshot_date: date, monthly_cost: priceFor(prices, r.domain, r.sku) });
     }
   }
@@ -49,7 +55,8 @@ function sum(arr, f) { let s = 0; for (const x of arr) { const v = f(x); if (v !
 function countBy(arr, f) { const m = {}; for (const x of arr) { const k = f(x); m[k] = (m[k] || 0) + 1; } return m; }
 
 function overview(db) {
-  const accounts = currentAccounts(db);
+  const everyone = currentAccounts(db, { all: true });
+  const accounts = everyone.filter(a => !isHidden(a));
   const tenants = tenantMap(db);
   const snaps = new Map();
   for (const { tenant_id, date } of latestDates(db)) {
@@ -82,7 +89,7 @@ function overview(db) {
       status: countBy(mine, a => a.status),
       licenses: licenses.sort((a, b) => b.assigned - a.assigned),
       google_seats: googleSeats,
-      unlicensed: mine.filter(a => a.sku === 'Unlicensed').length,
+      hidden: everyone.filter(a => a.tenant_id === t.id && isHidden(a)).length,
       storage_gb: sum(mine, a => a.total_gb),
       pooled_used_gb: snap?.storage_used_mb != null ? Math.round(snap.storage_used_mb / 1024 * 100) / 100 : null,
       pooled_total_gb: snap?.storage_total_mb != null ? Math.round(snap.storage_total_mb / 1024 * 100) / 100 : null,
@@ -130,7 +137,7 @@ function overview(db) {
       suspended: accounts.filter(a => a.status === 'suspended').length,
       archived: accounts.filter(a => a.status === 'archived').length,
       licensed: accounts.filter(a => !NOT_BILLED.has(a.sku)).length,
-      unlicensed: accounts.filter(a => a.sku === 'Unlicensed').length,
+      hidden: everyone.length - accounts.length,
       domains: domainRows.filter(d => d.accounts > 0).length,
       tenants: tenantRows.length,
       storage_gb: sum(accounts, a => a.total_gb),
@@ -155,6 +162,7 @@ function changes(db, from, to) {
     if (!t) continue;
     const createdDate = (a.created_on || a.first_seen).slice(0, 10);
     const snap = lastSku.get(a.tenant_id, a.email) || {};
+    if (isHidden(snap)) continue;
     const base = { tenant: t.label, email: a.email, domain: a.domain, full_name: a.full_name, sku: snap.sku || null, monthly_cost: snap.sku ? priceFor(prices, a.domain, snap.sku) : null };
     if (createdDate >= from && createdDate <= to) rows.push({ ...base, change: 'created', date: createdDate, by: a.created_by, source: a.created_on ? 'Google' : 'first sync' });
     if (a.deleted_on && a.deleted_on >= from && a.deleted_on <= to) rows.push({ ...base, change: 'deleted', date: a.deleted_on, by: a.deleted_by, source: a.deleted_by ? 'audit log' : 'missing from sync' });
@@ -197,6 +205,7 @@ function monthly(db, month, todayStr = new Date().toISOString().slice(0, 10)) {
       if (!snapDate) continue;
       if (!firstCovered || ds < firstCovered) firstCovered = ds;
       for (const r of rowsFor(snapDate)) {
+        if (isHidden(r)) continue;
         const price = priceFor(prices, r.domain, r.sku);
         const key = `${t.id}|${r.email}|${r.sku}`;
         if (!perAccount.has(key)) perAccount.set(key, { tenant: t.label, email: r.email, domain: r.domain, full_name: r.full_name, sku: r.sku, status: r.status, price, days: 0 });
@@ -253,4 +262,4 @@ function toCsv(columns, rows) {
   return '﻿' + [columns.map(c => esc(c.label)).join(','), ...rows.map(r => columns.map(c => esc(typeof c.get === 'function' ? c.get(r) : r[c.key])).join(','))].join('\r\n');
 }
 
-module.exports = { overview, currentAccounts, changes, monthly, priceFor, loadPrices, toCsv, NOT_BILLED };
+module.exports = { isHidden, overview, currentAccounts, changes, monthly, priceFor, loadPrices, toCsv, NOT_BILLED };

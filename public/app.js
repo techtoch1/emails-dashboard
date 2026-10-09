@@ -104,7 +104,7 @@ async function render() {
 }
 
 async function getOverview() { return state.overview ||= await api('/api/overview'); }
-async function getAccounts() { return state.accounts ||= (await api('/api/accounts')).accounts; }
+async function getAccounts() { return state.accounts ||= (await api(`/api/accounts${state.showAll ? '?all=1' : ''}`)).accounts; }
 
 // ---- Overview --------------------------------------------------------------
 async function viewOverview() {
@@ -119,7 +119,7 @@ async function viewOverview() {
   view().innerHTML = `
     <div class="kpis">
       ${kpi('Email accounts', n(t.accounts), `${n(t.active)} active · ${n(t.suspended)} suspended${t.archived ? ` · ${n(t.archived)} archived` : ''}`)}
-      ${kpi('Licensed', n(t.licensed), `${n(t.unlicensed)} without a license`)}
+      ${kpi('Licensed', n(t.licensed), t.hidden ? `${n(t.hidden)} accounts with no Workspace license not counted` : 'every account has a license')}
       ${kpi('Domains', n(t.domains), `across ${n(t.tenants)} tenant${t.tenants === 1 ? '' : 's'}`)}
       ${kpi('Storage used', gb(t.storage_gb), 'Gmail + Drive + Photos')}
       ${kpi('Monthly cost', money(t.monthly_cost, o.currency), t.unpriced_accounts ? `${n(t.unpriced_accounts)} accounts have no price` : 'every account priced', !!t.unpriced_accounts)}
@@ -169,7 +169,7 @@ function tenantCard(t) {
     <h3>${h(t.label)}</h3>
     <div class="meta">${h(t.primary_domain || '')} · ${n(t.domains.length)} domain${t.domains.length === 1 ? '' : 's'}</div>
     <div class="row"><span>Email accounts</span><span class="num">${n(t.accounts)}</span></div>
-    <div class="row"><span>Without a license</span><span class="num">${n(t.unlicensed)}</span></div>
+    ${t.hidden ? `<div class="row muted"><span>Not counted (no Workspace license)</span><span class="num">${n(t.hidden)}</span></div>` : ''}
     <div class="row"><span>Storage (accounts)</span><span class="num">${gb(t.storage_gb)}</span></div>
     ${t.pooled_total_gb ? `<div class="row"><span>Pooled storage</span><span class="num">${gb(t.pooled_used_gb)} of ${gb(t.pooled_total_gb)}</span></div>` : ''}
     <div class="row"><span>Monthly cost</span><span class="num">${money(t.monthly_cost, state.overview.currency)}</span></div>
@@ -203,6 +203,7 @@ async function viewAccounts() {
         <option value="">Any</option><option value="30">Not in 30 days</option><option value="90">Not in 90 days</option><option value="never">Never signed in</option>
       </select></label>
       <label>Search <input id="f-q" type="search" placeholder="Name or email" value="${h(f.q || '')}"></label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="f-all" ${state.showAll ? 'checked' : ''}> Include accounts with no Workspace license</label>
     </div>
     <p class="count" id="acc-count"></p>
     <div class="table-wrap"><table>
@@ -249,6 +250,7 @@ async function viewAccounts() {
       <td colspan="2"></td><td class="num">${money(Math.round(sumOf('monthly_cost') * 100) / 100, o.currency)}</td></tr>` : '';
   };
   const bind = (id, key) => $(id).addEventListener(id === '#f-q' ? 'input' : 'change', e => { f[key] = e.target.value || undefined; draw(); });
+  $('#f-all').addEventListener('change', e => { state.showAll = e.target.checked; state.accounts = null; render(); });
   bind('#f-tenant', 'tenant'); bind('#f-domain', 'domain'); bind('#f-sku', 'sku'); bind('#f-status', 'status'); bind('#f-login', 'login'); bind('#f-q', 'q');
   document.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => {
     state.sort = { col: th.dataset.col, dir: state.sort.col === th.dataset.col ? -state.sort.dir : 1 };
