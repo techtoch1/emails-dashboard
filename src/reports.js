@@ -1,7 +1,7 @@
 'use strict';
 // Everything the screens show is computed here from the snapshots.
 
-const NOT_BILLED = new Set(['Unlicensed', 'Unknown']);
+const NOT_BILLED = new Set(['Unlicensed', 'Unknown', 'Cloud Identity Free']);
 
 function loadPrices(db) {
   const m = new Map();

@@ -45,3 +45,23 @@ test('login is refused with a wrong password', async t => {
   const r = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: 'wrong' }) });
   assert.equal(r.status, 401);
 });
+
+test('changing a tenant\'s admin clears what was synced from the old one; removing deletes it', async t => {
+  const { db, server, as } = await start();
+  t.after(() => server.close());
+  const admin = await as('admin');
+  const { id } = await (await admin('/api/tenants', { method: 'POST', body: { label: 'T', admin_email: 'a@one.example' } })).json();
+  db.prepare("INSERT INTO accounts (tenant_id, email, domain, first_seen, last_seen) VALUES (?, 'x@one.example', 'one.example', '2026-01-01', '2026-01-01')").run(id);
+  db.prepare("UPDATE tenants SET primary_domain = 'one.example' WHERE id = ?").run(id);
+
+  await admin(`/api/tenants/${id}`, { method: 'PUT', body: { label: 'T renamed', admin_email: 'a@one.example' } });
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM accounts').get().n, 1, 'a rename keeps the data');
+
+  const r = await (await admin(`/api/tenants/${id}`, { method: 'PUT', body: { label: 'T', admin_email: 'a@two.example' } })).json();
+  assert.equal(r.cleared, true);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM accounts').get().n, 0);
+  assert.equal(db.prepare('SELECT primary_domain p FROM tenants WHERE id = ?').get(id).p, null);
+
+  assert.equal((await admin(`/api/tenants/${id}`, { method: 'DELETE' })).status, 200);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM tenants').get().n, 0);
+});

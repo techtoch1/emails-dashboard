@@ -183,11 +183,29 @@ function createApp(db, { clientFactory } = {}) {
   app.put('/api/tenants/:id', can('tenants'), (req, res) => {
     try {
       const t = tenantInput(req.body);
-      const r = db.prepare('UPDATE tenants SET label = ?, admin_email = ?, customer_id = ?, key_file = ?, enabled = ? WHERE id = ?')
-        .run(t.label, t.admin_email, t.customer_id, t.key_file, t.enabled, Number(req.params.id));
-      if (!r.changes) return res.status(404).json({ error: 'No such tenant' });
-      res.json({ ok: true });
+      const id = Number(req.params.id);
+      const before = db.prepare('SELECT * FROM tenants WHERE id = ?').get(id);
+      if (!before) return res.status(404).json({ error: 'No such tenant' });
+      // A different admin or customer can mean a different tenant entirely.
+      // Keeping the old snapshots would make every old account look deleted.
+      const moved = before.admin_email !== t.admin_email || before.customer_id !== t.customer_id;
+      dbm.tx(db, () => {
+        db.prepare('UPDATE tenants SET label = ?, admin_email = ?, customer_id = ?, key_file = ?, enabled = ? WHERE id = ?')
+          .run(t.label, t.admin_email, t.customer_id, t.key_file, t.enabled, id);
+        if (moved) clearTenantData(db, id);
+      });
+      res.json({ ok: true, cleared: moved });
     } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+  app.delete('/api/tenants/:id', can('tenants'), (req, res) => {
+    const id = Number(req.params.id);
+    dbm.tx(db, () => {
+      clearTenantData(db, id);
+      db.prepare('DELETE FROM seat_overrides WHERE tenant_id = ?').run(id);
+      db.prepare('DELETE FROM sync_runs WHERE tenant_id = ?').run(id);
+      db.prepare('DELETE FROM tenants WHERE id = ?').run(id);
+    });
+    res.json({ ok: true });
   });
   app.put('/api/tenants/:id/seats', can('tenants'), (req, res) => {
     const sku = String(req.body?.sku || '').trim();
@@ -202,7 +220,8 @@ function createApp(db, { clientFactory } = {}) {
   app.post('/api/tenants/:id/test', can('tenants'), async (req, res) => {
     const t = db.prepare('SELECT * FROM tenants WHERE id = ?').get(Number(req.params.id));
     if (!t) return res.status(404).json({ error: 'No such tenant' });
-    res.json({ checks: await sync.testTenant(t, syncOpts) });
+    const others = db.prepare('SELECT label, primary_domain FROM tenants WHERE id < ? AND enabled = 1 AND primary_domain IS NOT NULL').all(t.id);
+    res.json({ checks: await sync.testTenant(t, { ...syncOpts, others }) });
   });
   app.post('/api/sync', can('sync'), (req, res) => {
     if (sync.isSyncing()) return res.json({ started: false, message: 'A sync is already running' });
@@ -227,6 +246,14 @@ function createApp(db, { clientFactory } = {}) {
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
   return app;
+}
+
+// Removes everything synced for a tenant (not the tenant itself).
+function clearTenantData(db, id) {
+  for (const table of ['account_snapshots', 'tenant_snapshots', 'accounts', 'events']) {
+    db.prepare(`DELETE FROM ${table} WHERE tenant_id = ?`).run(id);
+  }
+  db.prepare('UPDATE tenants SET primary_domain = NULL WHERE id = ?').run(id);
 }
 
 function sendCsv(res, name, csv) {

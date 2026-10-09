@@ -421,7 +421,7 @@ async function viewTenants() {
     <div id="t-form"></div>
     ${data.tenants.length ? data.tenants.map(t => `<div class="panel">
       <div class="section-head" style="margin-top:0"><h3>${h(t.label)}${t.enabled ? '' : ' <span class="chip">disabled</span>'}</h3><span class="rule" aria-hidden="true"></span>
-        <div class="actions"><button class="btn secondary small" data-test="${t.id}" type="button">Test connection</button><button class="btn secondary small" data-edit="${t.id}" type="button">Edit</button></div></div>
+        <div class="actions"><button class="btn secondary small" data-test="${t.id}" type="button">Test connection</button><button class="btn secondary small" data-edit="${t.id}" type="button">Edit</button><button class="btn secondary small" data-remove="${t.id}" type="button">Remove</button></div></div>
       <div class="small">Reads as <strong>${h(t.admin_email)}</strong> · customer <code>${h(t.customer_id)}</code> · primary domain ${h(t.primary_domain || 'learned on first sync')}${t.key_file ? ` · key <code>${h(t.key_file)}</code>` : ''}</div>
       <div id="test-${t.id}"></div>
       <div style="margin-top:10px"><span class="small muted">Seats purchased (Annual plans) — leave blank on Flexible plans:</span>
@@ -457,6 +457,8 @@ async function viewTenants() {
       const f = new FormData(e.target);
       const body = { label: f.get('label'), admin_email: f.get('admin_email'), customer_id: f.get('customer_id'), key_file: f.get('key_file') || null, enabled: f.get('enabled') === 'on' };
       try {
+        if (t.id && (body.admin_email !== t.admin_email || body.customer_id !== t.customer_id) && t.primary_domain &&
+            !confirm('Changing the admin email or customer ID clears what was synced for this tenant, so it can be re-read from the right tenant. Continue?')) return;
         await api(t.id ? `/api/tenants/${t.id}` : '/api/tenants', { method: t.id ? 'PUT' : 'POST', body });
         state.overview = state.accounts = null;
         render();
@@ -466,6 +468,13 @@ async function viewTenants() {
   };
   $('#t-add').addEventListener('click', () => form());
   view().querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => form(data.tenants.find(t => t.id === Number(b.dataset.edit)))));
+  view().querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', async () => {
+    const t = data.tenants.find(x => x.id === Number(b.dataset.remove));
+    if (!confirm(`Remove "${t.label}" and everything synced from it? Nothing in Google changes.`)) return;
+    await api(`/api/tenants/${t.id}`, { method: 'DELETE' });
+    state.overview = state.accounts = null;
+    render();
+  }));
   view().querySelectorAll('[data-test]').forEach(b => b.addEventListener('click', async () => {
     const out = $(`#test-${b.dataset.test}`);
     out.innerHTML = '<p class="small muted">Testing…</p>';

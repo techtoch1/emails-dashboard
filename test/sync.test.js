@@ -73,3 +73,26 @@ test('CSV export neutralises spreadsheet formulas', () => {
   assert.match(csv, /'=HYPERLINK/);
   assert.match(csv, /\r\n-5$/);
 });
+
+test('a free Cloud Identity license never counts as the billed license', () => {
+  const { splitLicenses } = require('../src/sync');
+  const ci = { productId: '101001', sku: 'Cloud Identity Free' };
+  const starter = { productId: 'Google-Apps', sku: 'Business Starter' };
+  assert.deepEqual(splitLicenses([ci, starter]), { sku: 'Business Starter', extra: 'Cloud Identity Free' });
+  assert.deepEqual(splitLicenses([ci]), { sku: 'Unlicensed', extra: 'Cloud Identity Free' });
+  assert.deepEqual(splitLicenses([]), { sku: 'Unlicensed', extra: null });
+});
+
+test('a second tenant read through an admin of the first is refused, the first keeps syncing', async () => {
+  const db = dbm.open(':memory:');
+  const add = label => db.prepare("INSERT INTO tenants (label, admin_email, created_at) VALUES (?, 'admin@t1.example', 'x')").run(label).lastInsertRowid;
+  const first = add('First'), second = add('Second by mistake');
+  const spec = { domains: ['t1.example'], users: [U('a@t1.example', '2026-01-10')] };
+  const sync = id => syncTenant(db, db.prepare('SELECT * FROM tenants WHERE id = ?').get(id), { date: '2026-03-01', clientFactory: () => new FakeGoogle(spec, '2026-03-01') });
+  assert.ok((await sync(first)).ok);
+  const r = await sync(second);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /already added as "First"/);
+  assert.ok((await sync(first)).ok);
+  assert.equal(reports.overview(db).totals.accounts, 1);
+});

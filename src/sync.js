@@ -12,13 +12,26 @@ function defaultClientFactory(tenant) {
   return new GoogleClient({ key, subject: tenant.admin_email });
 }
 
+// Products every account can hold at no charge. Google lists a Cloud Identity
+// Free license for each account, so it must never count as "the" license.
+const FREE_PRODUCTS = new Set(['101001']);
+
 // Picks the license an account is billed on: the Workspace edition when it
-// has one, otherwise whatever it does hold.
+// has one, otherwise any other paid license. Free ones only show as extras;
+// an account holding nothing paid is 'Unlicensed'.
 function splitLicenses(list) {
-  if (!list || !list.length) return { sku: 'Unlicensed', extra: null };
-  const main = list.find(l => l.productId === 'Google-Apps') || list[0];
-  const extra = list.filter(l => l !== main).map(l => l.sku);
-  return { sku: main.sku, extra: extra.length ? extra.join(', ') : null };
+  const all = list || [];
+  const paid = all.filter(l => !FREE_PRODUCTS.has(l.productId));
+  const main = paid.find(l => l.productId === 'Google-Apps') || paid[0];
+  const extra = all.filter(l => l !== main).map(l => l.sku);
+  return { sku: main ? main.sku : 'Unlicensed', extra: extra.length ? extra.join(', ') : null };
+}
+
+// Counts per license name, e.g. "Business Starter 241 · Business Standard 10".
+function summarizeLicenses(list) {
+  const by = {};
+  for (const l of list) by[l.sku] = (by[l.sku] || 0) + 1;
+  return Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ') || 'none';
 }
 
 async function collect(tenant, client, date) {
@@ -157,6 +170,13 @@ async function syncTenant(db, tenant, { clientFactory = defaultClientFactory, da
     const last = db.prepare('SELECT MAX(time) t FROM events WHERE tenant_id = ?').get(tenant.id);
     const client = clientFactory(tenant);
     const data = await collect({ ...tenant, last_event_time: last?.t || null }, client, date);
+    // The admin email decides which tenant Google answers for. If it belongs
+    // to a tenant added earlier, recording it again would duplicate that
+    // tenant's accounts and costs; the earlier one keeps syncing.
+    const twin = db.prepare('SELECT label FROM tenants WHERE id < ? AND enabled = 1 AND primary_domain = ?').get(tenant.id, data.primary);
+    if (twin) {
+      throw new Error(`${tenant.admin_email} belongs to the ${data.primary} tenant, which is already added as "${twin.label}". Use an admin of the tenant you mean to add.`);
+    }
     const { accounts } = record(db, tenant, data, date);
     db.prepare('UPDATE sync_runs SET finished_at = ?, ok = 1, accounts = ?, warnings = ? WHERE id = ?')
       .run(new Date().toISOString(), accounts, JSON.stringify(data.warnings), runId);
@@ -183,7 +203,7 @@ function isSyncing() { return !!running; }
 
 // Checks each API with the tenant's credentials and reports what works —
 // the setup screen uses this so a missing scope is named, not guessed at.
-async function testTenant(tenant, { clientFactory = defaultClientFactory } = {}) {
+async function testTenant(tenant, { clientFactory = defaultClientFactory, others = [] } = {}) {
   const checks = [];
   let client;
   try { client = clientFactory(tenant); } catch (e) { return [{ name: 'Service-account key', ok: false, detail: e.message }]; }
@@ -193,12 +213,18 @@ async function testTenant(tenant, { clientFactory = defaultClientFactory } = {})
   await run('Sign in as admin (domain-wide delegation)', async () => { await client.accessToken(); return `acting as ${tenant.admin_email}`; });
   if (!checks[0].ok) return checks;
   let primary = tenant.primary_domain;
-  await run('Domains', async () => { const d = await client.listDomains(tenant.customer_id); primary = d.find(x => x.primary)?.domain || primary; return `${d.length} domain(s)`; });
+  await run('Domains', async () => {
+    const d = await client.listDomains(tenant.customer_id);
+    primary = d.find(x => x.primary)?.domain || primary;
+    const twin = others.find(o => o.primary_domain === primary);
+    if (twin) throw new Error(`primary domain ${primary} — that tenant is already added as "${twin.label}". This admin email belongs to the wrong tenant.`);
+    return `primary domain ${primary}, ${d.length} domain(s)`;
+  });
   await run('Users', async () => `${(await client.listUsers(tenant.customer_id)).length} account(s)`);
-  await run('Licenses', async () => `${(await client.listLicenses(tenant.customer_id !== 'my_customer' ? tenant.customer_id : primary)).length} license assignment(s)`);
+  await run('Licenses', async () => summarizeLicenses(await client.listLicenses(tenant.customer_id !== 'my_customer' ? tenant.customer_id : primary)));
   await run('Storage report', async () => { const s = await client.userStorage(); return s.date ? `data for ${s.date}` : 'no data yet'; });
   await run('Audit log', async () => `${(await client.adminEvents(new Date(Date.now() - 7 * 86400000).toISOString())).length} event(s) this week`);
   return checks;
 }
 
-module.exports = { syncTenant, syncAll, isSyncing, testTenant, updateLifecycle, splitLicenses, today };
+module.exports = { syncTenant, syncAll, isSyncing, testTenant, updateLifecycle, splitLicenses, summarizeLicenses, today };
