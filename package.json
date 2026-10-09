@@ -1,0 +1,21 @@
+{
+  "name": "aligned-workspace-dashboard",
+  "version": "0.1.0",
+  "description": "ALIGNED — read-only Google Workspace license, storage and cost dashboard across tenants",
+  "private": true,
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "add-user": "node --disable-warning=ExperimentalWarning ops/add-user.js",
+    "sync": "node --disable-warning=ExperimentalWarning ops/sync-now.js",
+    "import-legacy": "node --disable-warning=ExperimentalWarning ops/import-legacy-dashboard.js",
+    "demo": "node --disable-warning=ExperimentalWarning ops/seed-demo.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2"
+  }
+}

@@ -1,0 +1,98 @@
+name: Deploy
+
+# Deploys the dashboard to its server over SSH: syncs the files to
+# ~/workspace-dashboard and runs ops/setup-server.sh there (its own service on
+# port 3100 and its own nginx site; nothing else on the server is touched).
+#
+# Repo secrets (Settings → Secrets and variables → Actions):
+#   WSD_SSH_HOST       server hostname or IP              (required)
+#   WSD_SSH_USER       SSH user, with sudo                (required)
+#   WSD_SSH_PASSWORD   that user's password               (required)
+#   WSD_SSH_PORT       SSH port                            (optional, default 22)
+#   WSD_HOSTNAME       public hostname of the dashboard    (optional, default emails.aligned-tech.com)
+#   WSD_ADMIN_USER / WSD_ADMIN_PASSWORD  first dashboard login, used only while none exists (optional)
+#   WSD_SA_KEY_JSON    Google service-account key JSON     (optional; can be put on the server by hand instead)
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+concurrency:
+  group: workspace-dashboard-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SSHPASS: ${{ secrets.WSD_SSH_PASSWORD }}
+      HOST: ${{ secrets.WSD_SSH_HOST }}
+      USER_: ${{ secrets.WSD_SSH_USER }}
+      PORT_: ${{ secrets.WSD_SSH_PORT || '22' }}
+      PUBLIC_HOST: ${{ secrets.WSD_HOSTNAME || 'emails.aligned-tech.com' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check secrets
+        run: |
+          missing=""
+          for v in HOST USER_ SSHPASS; do [ -n "${!v}" ] || missing="$missing $v"; done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repo secrets (WSD_SSH_HOST / WSD_SSH_USER / WSD_SSH_PASSWORD). Add them under Settings → Secrets and variables → Actions, then re-run."
+            exit 1
+          fi
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y sshpass
+
+      - name: Run the tests
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+
+      # The database and the key live outside this directory, so --delete
+      # cannot remove them.
+      - name: Sync app files to server
+        run: |
+          sshpass -e ssh -p "$PORT_" -o StrictHostKeyChecking=accept-new "$USER_@$HOST" 'mkdir -p ~/workspace-dashboard'
+          sshpass -e rsync -az --delete \
+            -e "ssh -p $PORT_ -o StrictHostKeyChecking=accept-new" \
+            --exclude node_modules --exclude data --exclude .git --exclude .github \
+            ./ "$USER_@$HOST:workspace-dashboard/"
+
+      # sudo reads the password from a throwaway askpass helper that exists
+      # only for the length of this command and is readable only by the user.
+      - name: Install and restart on server
+        env:
+          WSD_SA_KEY_JSON: ${{ secrets.WSD_SA_KEY_JSON }}
+          WSD_ADMIN_USER: ${{ secrets.WSD_ADMIN_USER }}
+          WSD_ADMIN_PASSWORD: ${{ secrets.WSD_ADMIN_PASSWORD }}
+        run: |
+          {
+            printf 'export SSHPW=%q\n' "$SSHPASS"
+            printf 'export WSD_SA_KEY_JSON=%q\n' "$WSD_SA_KEY_JSON"
+            printf 'export WSD_ADMIN_USER=%q\n' "$WSD_ADMIN_USER"
+            printf 'export WSD_ADMIN_PASSWORD=%q\n' "$WSD_ADMIN_PASSWORD"
+            cat <<'REMOTE'
+          set -e
+          ASK=$(mktemp); chmod 700 "$ASK"
+          trap 'rm -f "$ASK"' EXIT
+          { echo '#!/bin/bash'; printf 'printf "%%s\\n" %q\n' "$SSHPW"; } > "$ASK"
+          unset SSHPW
+          export SUDO_ASKPASS="$ASK"
+          cd ~/workspace-dashboard
+          REMOTE
+            printf 'bash ops/setup-server.sh %q\n' "$PUBLIC_HOST"
+          } | sshpass -e ssh -p "$PORT_" -o StrictHostKeyChecking=accept-new "$USER_@$HOST" 'bash -s'
+
+      - name: Public check
+        run: |
+          for scheme in http https; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$scheme://$PUBLIC_HOST/api/me" || true)
+            echo "$scheme://$PUBLIC_HOST/api/me -> $code (401 means up and asking for a login)"
+          done

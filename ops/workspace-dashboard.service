@@ -1,0 +1,27 @@
+[Unit]
+Description=ALIGNED Workspace Licenses dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=aligned
+WorkingDirectory=/home/aligned/workspace-dashboard
+# __NODE__ is replaced by setup-server.sh with the Node 22 binary it found or installed.
+ExecStart=__NODE__ --disable-warning=ExperimentalWarning server.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PORT=3100
+Environment=GOOGLE_SA_KEY_FILE=/home/aligned/workspace-dashboard-secrets/service-account.json
+Environment=SYNC_HOUR_UTC=3
+# Database lives outside the code directory so a redeploy never touches it.
+Environment=DB_FILE=/home/aligned/workspace-dashboard-data/dashboard.db
+EnvironmentFile=-/home/aligned/workspace-dashboard-secrets/env
+# The app only needs its data directory writable.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/aligned/workspace-dashboard-data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
