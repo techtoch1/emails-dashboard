@@ -3,7 +3,7 @@
 A read-only dashboard over every Google Workspace tenant ALIGNED manages:
 how many email accounts each domain has, which tenant hosts each domain, which
 license each account holds, seats left, storage per account and per tenant,
-last login, accounts created and deleted, and what each domain costs per email
+last login, accounts created and deleted, and the monthly income from each domain per email
 with prices the accountant enters.
 
 It runs on the same server as the quotation system but separately from it:
@@ -21,7 +21,7 @@ its own port (3100), database, service and nginx site.
 | 6. Storage per email | **Accounts**: Gmail, Drive and total GB |
 | 7. Storage per tenant | **Overview → Tenants**: the sum across accounts, and pooled storage when Google reports it |
 | 8. Last login per email | **Accounts → Last login**, with a filter for "not in 30/90 days" and "never" |
-| 9. A price per domain and the cost per email | **Prices** (accountant): a price per email per month for each domain, optionally a different price per license. Every change is logged. Cost appears per account, per domain, per tenant and in **Monthly billing**, which prorates by day |
+| 9. A price per domain and the income per email | **Prices** (accountant): a price per email per month for each domain, optionally a different price per license. Every change is logged. Income appears per account, per domain, per tenant and in **Monthly billing**, which prorates by day |
 
 ## How it reads Google (read-only)
 
@@ -90,9 +90,10 @@ Set the real admin address under **Tenants** before the first live sync.
 
 ## Monthly billing
 
-Each account costs `price × days it held a license that month ÷ days in the month`.
+Each account brings in `price × days it held a license that month ÷ days in the month`.
+This is income (what clients pay ALIGNED), not what Google charges.
 This matches how Google bills Flexible plans. Suspended accounts still hold a
-license, so they're billed. Unlicensed accounts cost nothing unless you set a
+license, so they're billed. Unlicensed accounts bring in nothing unless you set a
 price for "Unlicensed". If a sync is missed, the previous day's snapshot fills
 that day. For the current month, days after the latest sync are projected from
 the latest sync. The per-email CSV is the detail the accountant needs.

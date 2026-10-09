@@ -72,7 +72,7 @@ function createApp(db, { clientFactory } = {}) {
     { get: r => r.last_active ? r.last_active.slice(0, 10) : 'Never', label: 'Last activity' },
     { get: r => r.last_login ? r.last_login.slice(0, 10) : 'Never', label: 'Last password sign-in' },
     { get: r => r.created_on ? r.created_on.slice(0, 10) : '', label: 'Created' },
-    { key: 'org_unit', label: 'Org unit' }, { key: 'monthly_cost', label: 'Monthly cost' },
+    { key: 'org_unit', label: 'Org unit' }, { key: 'monthly_cost', label: 'Monthly income' },
   ];
   app.get('/api/accounts', can('view'), (req, res) => res.json({ accounts: reports.currentAccounts(db, { all: req.query.all === '1' }) }));
   app.get('/api/accounts.csv', can('view'), (req, res) => {
@@ -88,7 +88,7 @@ function createApp(db, { clientFactory } = {}) {
   const CHANGE_COLS = [
     { key: 'date', label: 'Date' }, { key: 'change', label: 'Change' }, { key: 'email', label: 'Email' }, { key: 'full_name', label: 'Name' },
     { key: 'domain', label: 'Domain' }, { key: 'tenant', label: 'Tenant' }, { key: 'sku', label: 'License' },
-    { key: 'monthly_cost', label: 'Monthly cost' }, { key: 'by', label: 'By' }, { key: 'source', label: 'Source' },
+    { key: 'monthly_cost', label: 'Monthly income' }, { key: 'by', label: 'By' }, { key: 'source', label: 'Source' },
   ];
   app.get('/api/changes', can('view'), (req, res) => res.json(reports.changes(db, ...range(req))));
   app.get('/api/changes.csv', can('view'), (req, res) => {
@@ -103,7 +103,7 @@ function createApp(db, { clientFactory } = {}) {
     const cols = [
       { key: 'domain', label: 'Domain' }, { key: 'tenant', label: 'Tenant' }, { key: 'email', label: 'Email' }, { key: 'full_name', label: 'Name' },
       { key: 'sku', label: 'License' }, { key: 'status', label: 'Status at month end' }, { key: 'price', label: 'Monthly price' },
-      { key: 'days', label: 'Days in month' }, { key: 'cost', label: 'Cost (prorated)' },
+      { key: 'days', label: 'Days in month' }, { key: 'cost', label: 'Income (prorated)' },
     ];
     sendCsv(res, `billing-${m}.csv`, reports.toCsv(cols, reports.monthly(db, m).accounts));
   });

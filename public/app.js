@@ -122,14 +122,14 @@ async function viewOverview() {
       ${kpi('Licensed', n(t.licensed), t.hidden ? `${n(t.hidden)} accounts with no Workspace license not counted` : 'every account has a license')}
       ${kpi('Domains', n(t.domains), `across ${n(t.tenants)} tenant${t.tenants === 1 ? '' : 's'}`)}
       ${kpi('Storage used', gb(t.storage_gb), 'Gmail + Drive + Photos')}
-      ${kpi('Monthly cost', money(t.monthly_cost, o.currency), t.unpriced_accounts ? `${n(t.unpriced_accounts)} accounts have no price` : 'every account priced', !!t.unpriced_accounts)}
+      ${kpi('Monthly income', money(t.monthly_cost, o.currency), t.unpriced_accounts ? `${n(t.unpriced_accounts)} accounts have no price` : 'every account priced', !!t.unpriced_accounts)}
     </div>
     ${snapDates.length ? `<p class="small muted">Accounts as of ${h(snapDates[0])}${snapDates[0] !== snapDates.at(-1) ? `–${h(snapDates.at(-1))}` : ''}. Storage comes from Google's usage report, which runs 2–4 days behind.</p>` : ''}
     ${sectionHead('Tenants')}
     <div class="tenant-grid">${o.tenants.map(tenantCard).join('')}</div>
     ${sectionHead('Domains', `<input type="search" id="dom-q" placeholder="Find a domain" aria-label="Find a domain">`)}
     <div class="table-wrap"><table id="dom-table">
-      <thead><tr><th>Domain</th><th>Hosted on</th><th class="num">Emails</th><th class="num">Active</th><th class="num">Suspended</th><th>Licenses</th><th class="num">Storage</th><th class="num">Price / email</th><th class="num">Monthly cost</th></tr></thead>
+      <thead><tr><th>Domain</th><th>Hosted on</th><th class="num">Emails</th><th class="num">Active</th><th class="num">Suspended</th><th>Licenses</th><th class="num">Storage</th><th class="num">Price / email</th><th class="num">Monthly income</th></tr></thead>
       <tbody></tbody>
     </table></div>`;
   const body = $('#dom-table tbody');
@@ -172,7 +172,7 @@ function tenantCard(t) {
     ${t.hidden ? `<div class="row muted"><span>Not counted (no Workspace license)</span><span class="num">${n(t.hidden)}</span></div>` : ''}
     <div class="row"><span>Storage (accounts)</span><span class="num">${gb(t.storage_gb)}</span></div>
     ${t.pooled_total_gb ? `<div class="row"><span>Pooled storage</span><span class="num">${gb(t.pooled_used_gb)} of ${gb(t.pooled_total_gb)}</span></div>` : ''}
-    <div class="row"><span>Monthly cost</span><span class="num">${money(t.monthly_cost, state.overview.currency)}</span></div>
+    <div class="row"><span>Monthly income</span><span class="num">${money(t.monthly_cost, state.overview.currency)}</span></div>
     ${lic}
     ${gs.length ? `<div class="small muted">Google reports: ${gs.map(([k, v]) => `${h(k.replace(/_/g, ' '))} ${n(v.used)} of ${n(v.total)}`).join(' · ')}</div>` : ''}
     <div class="sync">${s ? `${s.ok ? '<span class="ok">Synced</span>' : '<span class="bad">Sync failed</span>'} ${h(when(s.at))}${s.error ? `<div class="bad">${h(s.error)}</div>` : ''}${s.warnings?.length ? `<div class="small" style="color:var(--warn-fg)">${s.warnings.length} warning${s.warnings.length === 1 ? '' : 's'} — see Tenants</div>` : ''}` : '<span class="muted">Not synced yet</span>'}</div>
@@ -184,7 +184,7 @@ function bindGo() { view().querySelectorAll('[data-go]').forEach(b => b.addEvent
 const ACCOUNT_COLS = [
   ['email', 'Email'], ['domain', 'Domain'], ['tenant', 'Tenant'], ['sku', 'License'], ['status', 'Status'],
   ['gmail_gb', 'Gmail', 'num'], ['drive_gb', 'Drive', 'num'], ['total_gb', 'Total storage', 'num'],
-  ['last_active', 'Last activity'], ['created_on', 'Created'], ['monthly_cost', 'Monthly cost', 'num'],
+  ['last_active', 'Last activity'], ['created_on', 'Created'], ['monthly_cost', 'Monthly income', 'num'],
 ];
 async function viewAccounts() {
   const [rows, o] = await Promise.all([getAccounts(), getOverview()]);
@@ -256,7 +256,7 @@ async function viewAccounts() {
     draw();
   }));
   $('#acc-export').addEventListener('click', () => downloadCsv(`accounts-${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Email', 'Name', 'Domain', 'Tenant', 'License', 'Other licenses', 'Status', 'Gmail GB', 'Drive GB', 'Photos GB', 'Total GB', 'Last activity', 'Last password sign-in', 'Created', 'Org unit', `Monthly cost (${o.currency})`],
+    ['Email', 'Name', 'Domain', 'Tenant', 'License', 'Other licenses', 'Status', 'Gmail GB', 'Drive GB', 'Photos GB', 'Total GB', 'Last activity', 'Last password sign-in', 'Created', 'Org unit', `Monthly income (${o.currency})`],
     filtered().map(r => [r.email, r.full_name, r.domain, r.tenant, r.sku, r.extra_skus, r.status, r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_active ? day(r.last_active) : 'Never', r.last_login ? day(r.last_login) : 'Never', day(r.created_on), r.org_unit, r.monthly_cost])));
   draw();
 }
@@ -308,7 +308,7 @@ async function viewChanges() {
       ${Object.entries(byDomain).sort((a, b) => a[0].localeCompare(b[0])).map(([d, v]) => `<tr><td>${h(d)}</td><td>${h(v.tenant)}</td><td class="num">${n(v.created)}</td><td class="num">${n(v.deleted)}</td><td class="num">${v.created - v.deleted > 0 ? '+' : ''}${n(v.created - v.deleted)}</td></tr>`).join('')}
     </tbody></table></div>` : ''}
     ${sectionHead('Accounts')}
-    ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Change</th><th>Email</th><th>Domain</th><th>Tenant</th><th>License</th><th class="num">Monthly cost</th><th>By</th><th>Source</th></tr></thead><tbody>
+    ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Change</th><th>Email</th><th>Domain</th><th>Tenant</th><th>License</th><th class="num">Monthly income</th><th>By</th><th>Source</th></tr></thead><tbody>
       ${r.rows.map(x => `<tr><td>${h(x.date)}</td><td><span class="chip ${x.change}">${x.change}</span></td>
         <td>${h(x.email)}<div class="small muted">${h(x.full_name || '')}</div></td><td>${h(x.domain)}</td><td>${h(x.tenant)}</td>
         <td>${h(x.sku || '—')}</td><td class="num">${x.sku ? money(x.monthly_cost, o.currency) : '—'}</td><td>${h(x.by || '—')}</td><td class="small muted">${h(x.source)}</td></tr>`).join('')}
@@ -334,16 +334,16 @@ async function viewBilling() {
     ${m.unpriced_accounts ? `<div class="banner">${n(m.unpriced_accounts)} licensed account${m.unpriced_accounts === 1 ? ' has' : 's have'} no price for its domain, so the total below leaves them out. Set them under <button class="linkish" data-go="prices">Prices</button>.</div>` : ''}
     <div class="kpis">
       ${kpi(`Total for ${month}`, money(m.total, cur), 'prorated by day, like Google’s Flexible plan')}
-      ${kpi('Accounts billed', n(m.accounts.filter(a => a.cost).length), `of ${n(m.accounts.length)} seen this month`)}
+      ${kpi('Emails billed', n(m.accounts.filter(a => a.cost).length), `of ${n(m.accounts.length)} seen this month`)}
       ${kpi('Created / deleted', `${n(m.changes.filter(c => c.change === 'created').length)} / ${n(m.changes.filter(c => c.change === 'deleted').length)}`, 'during the month')}
     </div>
     ${sectionHead('By domain')}
-    <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Accounts</th><th class="num">Licensed</th><th class="num">Created</th><th class="num">Deleted</th><th class="num">License-days</th><th class="num">Cost</th></tr></thead><tbody>
+    <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Accounts</th><th class="num">Licensed</th><th class="num">Created</th><th class="num">Deleted</th><th class="num">License-days</th><th class="num">Income</th></tr></thead><tbody>
       ${m.domains.map(d => `<tr><td>${h(d.domain)}</td><td>${d.tenants.map(h).join(', ')}</td><td class="num">${n(d.accounts)}</td><td class="num">${n(d.licensed)}</td>
         <td class="num">${d.created ? n(d.created) : ''}</td><td class="num">${d.deleted ? n(d.deleted) : ''}</td><td class="num">${n(d.license_days)}</td>
         <td class="num">${d.unpriced && !d.cost ? '<span class="notset">no price</span>' : money(d.cost, cur)}</td></tr>`).join('')}
     </tbody><tfoot><tr><td colspan="7">Total</td><td class="num">${money(m.total, cur)}</td></tr></tfoot></table></div>
-    <p class="small muted">Cost per email = monthly price × days it held a license in the month ÷ ${m.days}. Suspended accounts still hold their license, so they are billed; unlicensed accounts are not.</p>`;
+    <p class="small muted">Income per email = monthly price × days it held a license in the month ÷ ${m.days}. Suspended accounts still hold their license, so they are billed; unlicensed accounts are not.</p>`;
   $('#b-month').addEventListener('change', e => { state.filters.month = e.target.value; render(); });
   bindGo();
 }
@@ -363,7 +363,7 @@ async function viewPrices() {
     ${sectionHead('Prices', editable ? `<label class="small muted">Currency <input id="currency" value="${h(p.currency)}" maxlength="3" size="4" aria-label="Currency"></label>` : '')}
     <div class="note">Enter what each domain pays per email per month. A domain with one license has one box; a domain with several (e.g. Starter and Standard) has one box per license. ${editable ? 'Changes save as soon as you leave the box, and every change is logged below.' : 'Only an accountant or admin can change prices.'}</div>
     <div class="filters"><label>Find <input type="search" id="p-q" placeholder="Domain"></label><label>Show <select id="p-show"><option value="">All domains</option><option value="unset">Without a price</option></select></label></div>
-    <div class="table-wrap"><table id="p-table"><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Licensed emails</th><th>Price per email / month</th><th class="num">Monthly cost</th></tr></thead><tbody>
+    <div class="table-wrap"><table id="p-table"><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Licensed emails</th><th>Price per email / month</th><th class="num">Monthly income</th></tr></thead><tbody>
       ${domains.map(d => {
         const paid = Object.entries(d.licenses).filter(([s]) => s !== 'Unlicensed' && s !== 'Unknown' && s !== 'Cloud Identity Free');
         const licensed = paid.reduce((a, [, v]) => a + v, 0);
