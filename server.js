@@ -223,8 +223,15 @@ function createApp(db, { clientFactory } = {}) {
     const others = db.prepare('SELECT label, primary_domain FROM tenants WHERE id < ? AND enabled = 1 AND primary_domain IS NOT NULL').all(t.id);
     res.json({ checks: await sync.testTenant(t, { ...syncOpts, others }) });
   });
+  // Manual syncs only read from Google, but each one makes a few hundred API
+  // calls; a short cooldown keeps repeated clicks from eating the quota.
+  const SYNC_COOLDOWN_MS = 10 * 60 * 1000;
+  let lastManualSync = 0;
   app.post('/api/sync', can('sync'), (req, res) => {
     if (sync.isSyncing()) return res.json({ started: false, message: 'A sync is already running' });
+    const wait = lastManualSync + SYNC_COOLDOWN_MS - Date.now();
+    if (wait > 0) return res.json({ started: false, message: `Synced recently — try again in ${Math.ceil(wait / 60000)} min` });
+    lastManualSync = Date.now();
     sync.syncAll(db, syncOpts).catch(e => console.error('sync failed', e));
     res.json({ started: true });
   });

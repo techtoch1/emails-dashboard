@@ -5,7 +5,7 @@ const crypto = require('crypto');
 
 const ROLES = {
   admin: ['view', 'prices', 'tenants', 'users', 'sync'],
-  accountant: ['view', 'prices'],
+  accountant: ['view', 'prices', 'sync'],
   viewer: ['view'],
 };
 const SESSION_DAYS = 7;

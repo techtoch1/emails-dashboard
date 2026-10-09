@@ -56,7 +56,7 @@ $('#logout').addEventListener('click', async () => { await api('/api/logout', { 
 $('#sync-btn').addEventListener('click', async () => {
   const r = await api('/api/sync', { method: 'POST' });
   $('#sync-state').textContent = r.started ? 'Syncing with Google…' : r.message;
-  pollSync();
+  if (r.started || /already running/.test(r.message || '')) pollSync();
 });
 function pollSync() {
   const t = setInterval(async () => {
@@ -510,7 +510,7 @@ async function viewUsers() {
         <label>Role <select name="role">${r.roles.map(x => `<option${x === 'accountant' ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
         <label>Password (min 10 characters) <input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
       </div>
-      <p class="small muted">Admin: everything. Accountant: sees everything and sets prices. Viewer: read-only.</p>
+      <p class="small muted">Admin: everything. Accountant: sees everything, sets prices and can sync now. Viewer: read-only.</p>
       <p class="error" id="u-err"></p>
       <button class="btn" type="submit">Add user</button>
     </form>`;

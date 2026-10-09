@@ -65,3 +65,16 @@ test('changing a tenant\'s admin clears what was synced from the old one; removi
   assert.equal((await admin(`/api/tenants/${id}`, { method: 'DELETE' })).status, 200);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM tenants').get().n, 0);
 });
+
+test('accountants can start a sync, viewers cannot, and a second one waits for the cooldown', async t => {
+  const { server, as } = await start();
+  t.after(() => server.close());
+  const viewer = await as('viewer'), accountant = await as('accountant');
+  assert.equal((await viewer('/api/sync', { method: 'POST' })).status, 403);
+  const first = await (await accountant('/api/sync', { method: 'POST' })).json();
+  assert.equal(first.started, true);
+  await new Promise(r => setTimeout(r, 50)); // no tenants: the sync finishes at once
+  const second = await (await accountant('/api/sync', { method: 'POST' })).json();
+  assert.equal(second.started, false);
+  assert.match(second.message, /try again in 10 min/);
+});
