@@ -10,6 +10,8 @@ function h(v) {
   return v == null ? '' : String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 const nf = new Intl.NumberFormat(undefined);
+// "Google Workspace Business Starter" -> "Business Starter"
+const skuShort = s => String(s || '').replace(/^Google Workspace /, '');
 const n = v => v == null ? '—' : nf.format(v);
 const gb = v => v == null ? '—' : `${nf.format(Math.round(v * 100) / 100)} GB`;
 function money(v, cur) {
@@ -140,7 +142,7 @@ async function viewOverview() {
       <td><button class="linkish" data-domain="${h(d.domain)}">${h(d.domain)}</button></td>
       <td>${d.tenants.map(h).join('<br>')}</td>
       <td class="num">${n(d.accounts)}</td><td class="num">${n(d.active)}</td><td class="num">${d.suspended ? n(d.suspended) : ''}</td>
-      <td>${Object.entries(d.licenses).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="chip">${h(k)} × ${n(v)}</span>`).join('')}</td>
+      <td>${Object.entries(d.licenses).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="chip">${h(skuShort(k))} × ${n(v)}</span>`).join('')}</td>
       <td class="num">${gb(d.storage_gb)}</td>
       <td class="num">${d.price == null ? '<span class="notset">not set</span>' : money(d.price, o.currency)}</td>
       <td class="num">${d.unpriced && !d.monthly_cost ? '<span class="notset">no price</span>' : money(d.monthly_cost, o.currency)}${d.unpriced && d.monthly_cost ? `<div class="small notset">${n(d.unpriced)} unpriced</div>` : ''}</td>
@@ -157,7 +159,7 @@ function tenantCard(t) {
   const lic = t.licenses.map(l => {
     const pct = l.purchased ? Math.min(100, l.assigned / l.purchased * 100) : null;
     return `<div class="lic">
-      <div class="name"><span>${h(l.sku)}</span><span class="num">${n(l.assigned)}${l.purchased != null ? ` of ${n(l.purchased)}` : ''}</span></div>
+      <div class="name"><span>${h(skuShort(l.sku))}</span><span class="num">${n(l.assigned)}${l.purchased != null ? ` of ${n(l.purchased)}` : ''}</span></div>
       ${pct != null ? `<div class="bar${pct >= 100 ? ' full' : ''}" role="img" aria-label="${l.assigned} of ${l.purchased} seats used"><span style="width:${pct}%"></span></div>
         <div class="small ${l.remaining < 0 ? 'bad' : 'muted'}">${l.remaining < 0 ? `${n(-l.remaining)} over the purchased seats` : `${n(l.remaining)} remaining`}</div>`
       : '<div class="small muted">Seats purchased not known — Flexible plan, or enter it under Tenants</div>'}
@@ -236,7 +238,7 @@ async function viewAccounts() {
     $('#acc-body').innerHTML = shown.map(r => `<tr>
       <td>${h(r.email)}<div class="small muted">${h(r.full_name || '')}</div></td>
       <td>${h(r.domain)}</td><td>${h(r.tenant)}</td>
-      <td>${h(r.sku)}${r.extra_skus ? `<div class="small muted">+ ${h(r.extra_skus)}</div>` : ''}</td>
+      <td>${h(skuShort(r.sku))}${r.extra_skus ? `<div class="small muted">+ ${h(r.extra_skus)}</div>` : ''}</td>
       <td>${r.status === 'active' ? 'Active' : `<span class="chip ${h(r.status)}">${h(r.status)}</span>`}</td>
       <td class="num">${gb(r.gmail_gb)}</td><td class="num">${gb(r.drive_gb)}</td><td class="num">${gb(r.total_gb)}</td>
       <td title="Password sign-in: ${h(r.last_login ? day(r.last_login) : 'never')}">${r.last_active ? `${h(day(r.last_active))}<div class="small muted">${h(ago(r.last_active))}</div>` : '<span class="muted">Never</span>'}</td>
@@ -311,7 +313,7 @@ async function viewChanges() {
     ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Change</th><th>Email</th><th>Domain</th><th>Tenant</th><th>License</th><th class="num">Monthly income</th><th>By</th><th>Source</th></tr></thead><tbody>
       ${r.rows.map(x => `<tr><td>${h(x.date)}</td><td><span class="chip ${x.change}">${x.change}</span></td>
         <td>${h(x.email)}<div class="small muted">${h(x.full_name || '')}</div></td><td>${h(x.domain)}</td><td>${h(x.tenant)}</td>
-        <td>${h(x.sku || '—')}</td><td class="num">${x.sku ? money(x.monthly_cost, o.currency) : '—'}</td><td>${h(x.by || '—')}</td><td class="small muted">${h(x.source)}</td></tr>`).join('')}
+        <td>${h(skuShort(x.sku) || '—')}</td><td class="num">${x.sku ? money(x.monthly_cost, o.currency) : '—'}</td><td>${h(x.by || '—')}</td><td class="small muted">${h(x.source)}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">No account was created or deleted in this period.</div>'}
     <p class="small muted">Created dates are Google's own account creation time. Deleted dates come from the admin audit log when Google reported the deletion; otherwise they are the first daily sync that no longer found the account.</p>`;
   const set = (f, t) => { state.filters.from = f; state.filters.to = t; render(); };
@@ -320,31 +322,64 @@ async function viewChanges() {
   view().querySelectorAll('[data-range]').forEach(b => b.addEventListener('click', () => set(...monthRange(Number(b.dataset.range)))));
 }
 
-// ---- Monthly billing -----------------------------------------------------------
+// ---- Billing report --------------------------------------------------------------
+function periodLabel(period, key) {
+  if (period === 'year') return key;
+  if (period === 'month') return new Date(`${key}-01T00:00:00Z`).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return new Date(`${key}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
 async function viewBilling() {
-  const month = state.filters.month || new Date().toISOString().slice(0, 7);
-  const m = await api(`/api/monthly?month=${month}`);
-  const cur = m.currency;
+  const today = new Date().toISOString();
+  const period = state.filters.bperiod || 'month';
+  const key = state.filters[`bkey_${period}`] || { day: today.slice(0, 10), month: today.slice(0, 7), year: today.slice(0, 4) }[period];
+  const r = await api(`/api/billing?period=${period}&key=${key}`);
+  const cur = r.currency;
+  const label = periodLabel(period, key);
+  const added = r.changes.filter(c => c.change === 'created'), removed = r.changes.filter(c => c.change === 'deleted');
+  const thisYear = Number(today.slice(0, 4));
+  const picker = period === 'day' ? `<input type="date" id="b-key" value="${key}" aria-label="Day">`
+    : period === 'month' ? `<input type="month" id="b-key" value="${key}" aria-label="Month">`
+    : `<select id="b-key" aria-label="Year">${[0, 1, 2, 3, 4].map(i => thisYear - i).map(y => `<option${String(y) === key ? ' selected' : ''}>${y}</option>`).join('')}</select>`;
+  const changesSection = `${sectionHead('Emails added and removed')}
+    ${r.changes.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Change</th><th>Email</th><th>Domain</th><th>Tenant</th><th>License</th><th class="num">Price / month</th><th>By</th></tr></thead><tbody>
+      ${r.changes.map(x => `<tr><td>${h(x.date)}</td><td><span class="chip ${x.change}">${x.change === 'created' ? 'added' : 'removed'}</span></td>
+        <td>${h(x.email)}<div class="small muted">${h(x.full_name || '')}</div></td><td>${h(x.domain)}</td><td>${h(x.tenant)}</td>
+        <td>${h(skuShort(x.sku) || '—')}</td><td class="num">${x.sku ? money(x.monthly_cost, cur) : '—'}</td><td class="small">${h(x.by || x.source || '—')}</td></tr>`).join('')}
+    </tbody></table></div>` : `<div class="empty">No email was added or removed ${period === 'day' ? 'on' : 'in'} ${h(label)}.</div>`}`;
   view().innerHTML = `
-    ${sectionHead('Monthly billing', `<a class="btn secondary" href="/api/monthly.csv?month=${month}">Export per-email detail (CSV)</a>`)}
-    <div class="filters"><label>Month <input type="month" id="b-month" value="${month}"></label></div>
-    ${m.projected ? `<div class="note">This month is not over yet: days after the latest sync are projected from the accounts as they are now.</div>` : ''}
-    ${m.covered_from && m.covered_from > m.start ? `<div class="banner">Sync history starts on ${h(m.covered_from)}, so days before that are not counted for this month.</div>` : ''}
-    ${!m.covered_from ? '<div class="empty">No sync covers this month.</div>' : ''}
-    ${m.unpriced_accounts ? `<div class="banner">${n(m.unpriced_accounts)} licensed account${m.unpriced_accounts === 1 ? ' has' : 's have'} no price for its domain, so the total below leaves them out. Set them under <button class="linkish" data-go="prices">Prices</button>.</div>` : ''}
-    <div class="kpis">
-      ${kpi(`Total for ${month}`, money(m.total, cur), 'prorated by day, like Google’s Flexible plan')}
-      ${kpi('Emails billed', n(m.accounts.filter(a => a.cost).length), `of ${n(m.accounts.length)} seen this month`)}
-      ${kpi('Created / deleted', `${n(m.changes.filter(c => c.change === 'created').length)} / ${n(m.changes.filter(c => c.change === 'deleted').length)}`, 'during the month')}
+    ${sectionHead('Billing report', `<a class="btn secondary" href="/api/changes.csv?from=${r.start}&to=${r.end}">Added &amp; removed (CSV)</a><a class="btn secondary" href="/api/billing.csv?period=${period}&key=${key}">Income per email (CSV)</a>`)}
+    <div class="filters">
+      <div class="seg" role="group" aria-label="Report period">${['day', 'month', 'year'].map(p => `<button type="button" data-period="${p}" aria-pressed="${p === period}">${{ day: 'Daily', month: 'Monthly', year: 'Yearly' }[p]}</button>`).join('')}</div>
+      ${picker}
     </div>
+    ${r.projected ? `<div class="note">${h(label)} is not over yet: days after the latest sync are projected from the accounts as they are now.</div>` : ''}
+    ${r.covered_from && r.covered_from > r.start ? `<div class="banner">Sync history starts on ${h(r.covered_from)}, so days before that are not counted in this report.</div>` : ''}
+    ${!r.covered_from ? '<div class="empty" style="margin-top:16px">No sync covers this period yet.</div>' : ''}
+    ${r.unpriced_accounts ? `<div class="banner">${n(r.unpriced_accounts)} email${r.unpriced_accounts === 1 ? ' has' : 's have'} no price, so the income below leaves ${r.unpriced_accounts === 1 ? 'it' : 'them'} out. Set prices under <button class="linkish" data-go="prices">Prices</button>.</div>` : ''}
+    <div class="kpis">
+      ${kpi(`Income · ${label}`, money(r.total, cur), period === 'day' ? 'one day of each monthly price' : 'prorated by day, like Google’s Flexible plan')}
+      ${kpi('Emails at period end', n(r.emails_at_end), r.projected ? 'projected' : `on ${r.end}`)}
+      ${kpi('Added', n(added.length), label)}
+      ${kpi('Removed', n(removed.length), label)}
+    </div>
+
+    ${period === 'year' ? '' : changesSection}
+    ${period === 'year' ? `${sectionHead('By month')}
+    <div class="table-wrap"><table><thead><tr><th>Month</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Income</th></tr></thead><tbody>
+      ${r.months.map(m => `<tr><td><button class="linkish" data-month="${m.month}">${h(periodLabel('month', m.month))}</button></td><td class="num">${m.added ? n(m.added) : ''}</td><td class="num">${m.removed ? n(m.removed) : ''}</td><td class="num">${money(m.income, cur)}</td></tr>`).join('')}
+    </tbody><tfoot><tr><td>Total</td><td class="num">${n(added.length)}</td><td class="num">${n(removed.length)}</td><td class="num">${money(r.total, cur)}</td></tr></tfoot></table></div>` : ''}
+
     ${sectionHead('By domain')}
-    <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Accounts</th><th class="num">Licensed</th><th class="num">Created</th><th class="num">Deleted</th><th class="num">License-days</th><th class="num">Income</th></tr></thead><tbody>
-      ${m.domains.map(d => `<tr><td>${h(d.domain)}</td><td>${d.tenants.map(h).join(', ')}</td><td class="num">${n(d.accounts)}</td><td class="num">${n(d.licensed)}</td>
+    <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Emails at end</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Email-days</th><th class="num">Income</th></tr></thead><tbody>
+      ${r.domains.map(d => `<tr><td>${h(d.domain)}</td><td>${d.tenants.map(h).join(', ')}</td><td class="num">${n(d.at_end)}</td>
         <td class="num">${d.created ? n(d.created) : ''}</td><td class="num">${d.deleted ? n(d.deleted) : ''}</td><td class="num">${n(d.license_days)}</td>
         <td class="num">${d.unpriced && !d.cost ? '<span class="notset">no price</span>' : money(d.cost, cur)}</td></tr>`).join('')}
-    </tbody><tfoot><tr><td colspan="7">Total</td><td class="num">${money(m.total, cur)}</td></tr></tfoot></table></div>
-    <p class="small muted">Income per email = monthly price × days it held a license in the month ÷ ${m.days}. Suspended accounts still hold their license, so they are billed; unlicensed accounts are not.</p>`;
-  $('#b-month').addEventListener('change', e => { state.filters.month = e.target.value; render(); });
+    </tbody><tfoot><tr><td colspan="6">Total</td><td class="num">${money(r.total, cur)}</td></tr></tfoot></table></div>
+    ${period === 'year' ? changesSection : ''}
+    <p class="small muted">Income per email = monthly price × days it held a license ÷ days in that month. Suspended emails still hold their license, so they count; emails without a Workspace license do not.</p>`;
+  view().querySelectorAll('[data-period]').forEach(b => b.addEventListener('click', () => { state.filters.bperiod = b.dataset.period; render(); }));
+  $('#b-key').addEventListener('change', e => { if (e.target.value) { state.filters[`bkey_${period}`] = e.target.value; render(); } });
+  view().querySelectorAll('[data-month]').forEach(b => b.addEventListener('click', () => { state.filters.bperiod = 'month'; state.filters.bkey_month = b.dataset.month; render(); }));
   bindGo();
 }
 
@@ -354,55 +389,75 @@ async function viewPrices() {
   const editable = can('prices');
   const domains = p.domains.filter(d => d.accounts);
   const priceOf = (d, s) => p.prices.find(x => x.domain === d && x.sku === s)?.price;
-  const costCell = d => d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, p.currency);
-  // placeholder: what applies when the box is empty (the domain price, if any)
-  const input = (d, sku, val, label, fallback) => editable
-    ? `<input class="price-input" type="number" min="0" step="0.01" inputmode="decimal" data-domain="${h(d)}" data-sku="${h(sku)}" value="${val ?? ''}" placeholder="${fallback != null ? h(fallback) : 'not set'}" aria-label="${h(label)}"> <span class="saved" aria-live="polite"></span>`
-    : (val ?? fallback) == null ? '<span class="notset">not set</span>' : money(val ?? fallback, p.currency);
+  const incomeCell = d => d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, p.currency);
+  const paidOf = d => Object.entries(d.licenses).filter(([s]) => !['Unlicensed', 'Unknown', 'Cloud Identity Free'].includes(s)).sort((a, b) => b[1] - a[1]);
+  // A license with its own price box. A domain with one license stores the
+  // domain price ('*'); with several, each license has its own, falling back
+  // to the domain price (shown in grey) when left empty.
+  const cell = (d, sku, licName, count, val, fallback) => `<label class="price-cell">
+      <span class="lic">${h(skuShort(licName))}<span class="muted"> × ${n(count)}</span></span>
+      ${editable
+        ? `<span class="price-box"><span class="cur">${h(p.currency)}</span><input class="price-input" type="number" min="0" step="0.01" inputmode="decimal" data-domain="${h(d)}" data-sku="${h(sku)}" value="${val ?? ''}" placeholder="${fallback != null ? h(fallback) : '—'}" aria-label="Price per ${h(skuShort(licName))} email on ${h(d)}"></span><span class="saved" aria-live="polite"></span>`
+        : `<span class="num">${(val ?? fallback) == null ? '<span class="notset">not set</span>' : money(val ?? fallback, p.currency)}</span>`}
+    </label>`;
+  const tenantsList = [...new Set(domains.flatMap(d => d.tenants))].sort();
+  const priced = domains.filter(d => !d.unpriced).length;
+  const totalIncome = domains.reduce((s, d) => s + (d.monthly_cost || 0), 0);
   view().innerHTML = `
-    ${sectionHead('Prices', editable ? `<label class="small muted">Currency <input id="currency" value="${h(p.currency)}" maxlength="3" size="4" aria-label="Currency"></label>` : '')}
-    <div class="note">Enter what each domain pays per email per month. A domain with one license has one box; a domain with several (e.g. Starter and Standard) has one box per license. ${editable ? 'Changes save as soon as you leave the box, and every change is logged below.' : 'Only an accountant or admin can change prices.'}</div>
-    <div class="filters"><label>Find <input type="search" id="p-q" placeholder="Domain"></label><label>Show <select id="p-show"><option value="">All domains</option><option value="unset">Without a price</option></select></label></div>
-    <div class="table-wrap"><table id="p-table"><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Licensed emails</th><th>Price per email / month</th><th class="num">Monthly income</th></tr></thead><tbody>
+    ${sectionHead('Prices', editable ? `<label class="small muted" style="display:flex;align-items:center;gap:6px">Currency <input id="currency" value="${h(p.currency)}" maxlength="3" size="4" aria-label="Currency"></label>` : '')}
+    <div class="kpis">
+      ${kpi('Domains priced', `${n(priced)} / ${n(domains.length)}`, priced === domains.length ? 'every domain has a price' : `${n(domains.length - priced)} still to price`)}
+      ${kpi('Monthly income', money(Math.round(totalIncome * 100) / 100, p.currency), 'from the prices set so far')}
+    </div>
+    <div class="filters">
+      <label>Find <input type="search" id="p-q" placeholder="Domain"></label>
+      <label>Tenant <select id="p-tenant"><option value="">All tenants</option>${tenantsList.map(t => `<option>${h(t)}</option>`).join('')}</select></label>
+      <label>Show <select id="p-show"><option value="">All domains</option><option value="unset">Still to price</option></select></label>
+      <span class="spacer"></span>
+      <span class="small muted" style="max-width:420px">${editable ? 'Price per email per month. A domain with two licenses (e.g. Starter and Standard) has a box for each. Saves when you leave the box; every change is logged below.' : 'Only an accountant or admin can change prices.'}</span>
+    </div>
+    <div class="table-wrap"><table id="p-table" class="prices"><thead><tr><th>Domain</th><th class="num">Emails</th><th>Price per email / month</th><th class="num">Monthly income</th></tr></thead><tbody>
       ${domains.map(d => {
-        const paid = Object.entries(d.licenses).filter(([s]) => s !== 'Unlicensed' && s !== 'Unknown' && s !== 'Cloud Identity Free');
+        const paid = paidOf(d);
         const licensed = paid.reduce((a, [, v]) => a + v, 0);
         const boxes = paid.length > 1
-          ? paid.sort((a, b) => b[1] - a[1]).map(([s, c]) => `<div style="margin:3px 0;display:flex;align-items:center;gap:8px;justify-content:space-between;max-width:330px"><span class="small">${h(s)} × ${n(c)}</span><span>${input(d.domain, s, priceOf(d.domain, s), `Price per ${s} email on ${d.domain}`, d.price)}</span></div>`).join('')
-          : input(d.domain, '*', d.price, `Price per email for ${d.domain}`);
-        return `<tr data-row="${h(d.domain)}" data-unset="${d.unpriced ? 1 : 0}"><td><strong>${h(d.domain)}</strong></td><td>${d.tenants.map(h).join('<br>')}</td>
-        <td class="num">${n(licensed)}</td>
-        <td>${boxes}</td>
-        <td class="num" data-cost="${h(d.domain)}">${costCell(d)}</td></tr>`;
+          ? paid.map(([s, c]) => cell(d.domain, s, s, c, priceOf(d.domain, s), d.price)).join('')
+          : cell(d.domain, '*', paid[0]?.[0] || 'All licenses', licensed, d.price);
+        return `<tr data-row="${h(d.domain)}" data-tenants="${h(d.tenants.join('|'))}" data-unset="${d.unpriced ? 1 : 0}">
+          <td><strong>${h(d.domain)}</strong><div class="small muted">${d.tenants.map(h).join(', ')}</div></td>
+          <td class="num">${n(licensed)}</td>
+          <td><div class="price-grid">${boxes}</div></td>
+          <td class="num" data-income="${h(d.domain)}">${incomeCell(d)}</td></tr>`;
       }).join('')}
     </tbody></table></div>
     ${sectionHead('Change log')}
     ${log.log.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Domain</th><th>License</th><th class="num">Old</th><th class="num">New</th><th>By</th></tr></thead><tbody>
-      ${log.log.map(l => `<tr><td>${h(when(l.changed_at))}</td><td>${h(l.domain)}</td><td>${l.sku === '*' ? 'All licenses' : h(l.sku)}</td><td class="num">${l.old_price == null ? '—' : money(l.old_price, p.currency)}</td><td class="num">${l.new_price == null ? 'removed' : money(l.new_price, p.currency)}</td><td>${h(l.changed_by)}</td></tr>`).join('')}
+      ${log.log.map(l => `<tr><td>${h(when(l.changed_at))}</td><td>${h(l.domain)}</td><td>${l.sku === '*' ? 'All licenses' : h(skuShort(l.sku))}</td><td class="num">${l.old_price == null ? '—' : money(l.old_price, p.currency)}</td><td class="num">${l.new_price == null ? 'removed' : money(l.new_price, p.currency)}</td><td>${h(l.changed_by)}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">No price has been changed yet.</div>'}`;
 
   const filter = () => {
-    const q = $('#p-q').value.toLowerCase(), unset = $('#p-show').value === 'unset';
-    view().querySelectorAll('#p-table tbody tr').forEach(tr => tr.classList.toggle('hidden', (q && !tr.dataset.row.includes(q)) || (unset && tr.dataset.unset !== '1')));
+    const q = $('#p-q').value.toLowerCase(), t = $('#p-tenant').value, unset = $('#p-show').value === 'unset';
+    view().querySelectorAll('#p-table tbody tr').forEach(tr => tr.classList.toggle('hidden',
+      (q && !tr.dataset.row.includes(q)) || (t && !tr.dataset.tenants.split('|').includes(t)) || (unset && tr.dataset.unset !== '1')));
   };
-  $('#p-q').addEventListener('input', filter);
-  $('#p-show').addEventListener('change', filter);
+  ['#p-q', '#p-tenant', '#p-show'].forEach(id => $(id).addEventListener(id === '#p-q' ? 'input' : 'change', filter));
   view().querySelectorAll('.price-input').forEach(inp => {
     inp.dataset.orig = inp.value;
     inp.addEventListener('change', async () => {
-      const mark = inp.nextElementSibling;
+      const mark = inp.closest('.price-cell').querySelector('.saved');
       try {
         await api('/api/prices', { method: 'PUT', body: { domain: inp.dataset.domain, sku: inp.dataset.sku, price: inp.value === '' ? null : inp.value } });
         mark.textContent = 'Saved';
         mark.className = 'saved';
         inp.dataset.orig = inp.value;
         state.overview = state.accounts = null;
-        // Refresh this domain's monthly cost, and the grey fallback shown in
-        // its per-license boxes, without redrawing (keeps the cursor in place).
+        // Refresh this domain's income without redrawing (keeps the cursor in place).
         api('/api/prices').then(fresh => {
           const d = fresh.domains.find(x => x.domain === inp.dataset.domain);
-          const cell = d && view().querySelector(`[data-cost="${CSS.escape(d.domain)}"]`);
-          if (cell) cell.innerHTML = d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, fresh.currency);
+          const c = d && view().querySelector(`[data-income="${CSS.escape(d.domain)}"]`);
+          if (c) c.innerHTML = d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, fresh.currency);
+          const tr = c?.closest('tr');
+          if (tr) tr.dataset.unset = d.unpriced ? 1 : 0;
         }).catch(() => {});
         setTimeout(() => { mark.textContent = ''; }, 2500);
       } catch (e) { mark.textContent = e.message; mark.className = 'error'; inp.value = inp.dataset.orig; }

@@ -151,3 +151,19 @@ td .chip, .chip { display: inline-block; font-size: 11px; padding: 1px 6px; bord
 .panel { background: var(--surface); border: 1px solid var(--rule); padding: 14px 16px; margin-bottom: 14px; }
 .checks li { margin: 3px 0; }
 pre.copy { background: var(--surface-2); border: 1px solid var(--rule); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 6px 0; }
+
+/* Segmented period switch (Billing report) */
+.seg { display: inline-flex; border: 1px solid var(--border); background: var(--surface); }
+.seg button { font: inherit; border: 0; background: none; padding: 6px 14px; cursor: pointer; color: var(--text); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--aligned-sapphire); color: #fff; font-weight: 700; }
+
+/* Prices: one row per domain, a compact box per license */
+table.prices td { vertical-align: middle; }
+.price-grid { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.price-cell { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.price-cell .lic { min-width: 150px; }
+.price-box { display: inline-flex; align-items: center; border: 1px solid var(--border); background: var(--surface); }
+.price-box .cur { font-size: 11px; color: var(--text-muted); padding: 0 6px; border-right: 1px solid var(--rule); align-self: stretch; display: flex; align-items: center; background: var(--surface-2); }
+.price-box .price-input { border: 0; width: 84px; padding: 5px 8px; }
+.price-box:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }

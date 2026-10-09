@@ -96,16 +96,23 @@ function createApp(db, { clientFactory } = {}) {
     sendCsv(res, `created-deleted-${from}-to-${to}.csv`, reports.toCsv(CHANGE_COLS, reports.changes(db, from, to).rows));
   });
 
-  function month(req) { return /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : new Date().toISOString().slice(0, 7); }
-  app.get('/api/monthly', can('view'), (req, res) => res.json(reports.monthly(db, month(req))));
-  app.get('/api/monthly.csv', can('view'), (req, res) => {
-    const m = month(req);
+  // Billing report period: ?period=day&key=2026-10-09 | month&key=2026-10 | year&key=2026
+  function period(req) {
+    const now = new Date().toISOString();
+    const p = ['day', 'month', 'year'].includes(req.query.period) ? req.query.period : 'month';
+    const re = { day: /^\d{4}-\d{2}-\d{2}$/, month: /^\d{4}-\d{2}$/, year: /^\d{4}$/ }[p];
+    const dflt = { day: now.slice(0, 10), month: now.slice(0, 7), year: now.slice(0, 4) }[p];
+    return [p, re.test(req.query.key) ? req.query.key : dflt];
+  }
+  app.get('/api/billing', can('view'), (req, res) => res.json(reports.billing(db, ...period(req))));
+  app.get('/api/billing.csv', can('view'), (req, res) => {
+    const [p, key] = period(req);
     const cols = [
       { key: 'domain', label: 'Domain' }, { key: 'tenant', label: 'Tenant' }, { key: 'email', label: 'Email' }, { key: 'full_name', label: 'Name' },
-      { key: 'sku', label: 'License' }, { key: 'status', label: 'Status at month end' }, { key: 'price', label: 'Monthly price' },
-      { key: 'days', label: 'Days in month' }, { key: 'cost', label: 'Income (prorated)' },
+      { key: 'sku', label: 'License' }, { key: 'status', label: 'Status at period end' }, { key: 'price', label: 'Monthly price' },
+      { key: 'days', label: 'Days billed' }, { key: 'cost', label: 'Income (prorated)' },
     ];
-    sendCsv(res, `billing-${m}.csv`, reports.toCsv(cols, reports.monthly(db, m).accounts));
+    sendCsv(res, `billing-report-${key}.csv`, reports.toCsv(cols, reports.billing(db, p, key).accounts));
   });
 
   // ---- prices (accountant) ----------------------------------------------

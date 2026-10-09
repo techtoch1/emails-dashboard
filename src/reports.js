@@ -176,17 +176,28 @@ function changes(db, from, to) {
 
 function daysInMonth(month) { const [y, m] = month.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
 
-// Billing for one calendar month, prorated by day like Google's Flexible plan:
-// each account costs price × (days it held its license that month ÷ days in month).
-// Days with no sync carry the previous sync forward; days after the newest
-// sync are projected from it.
-function monthly(db, month, todayStr = new Date().toISOString().slice(0, 10)) {
+function pad(n) { return String(n).padStart(2, '0'); }
+function addDay(ds) { const d = new Date(`${ds}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
+
+// The date range a billing report covers: one day, one month or one year.
+function periodRange(period, key) {
+  if (period === 'day') return { start: key, end: key };
+  if (period === 'year') return { start: `${key}-01-01`, end: `${key}-12-31` };
+  return { start: `${key}-01`, end: `${key}-${pad(daysInMonth(key))}` };
+}
+
+// Billing report for a day, a month or a year, prorated by day like
+// Google's Flexible plan: each day an email holds its license it brings in
+// price ÷ days in that month. Days with no sync carry the previous sync
+// forward; days after the newest sync are projected from it.
+function billing(db, period, key, todayStr = new Date().toISOString().slice(0, 10)) {
   const tenants = tenantMap(db);
   const prices = loadPrices(db);
-  const nDays = daysInMonth(month);
-  const start = `${month}-01`;
-  const end = `${month}-${String(nDays).padStart(2, '0')}`;
+  const { start, end } = periodRange(period, key);
   const perAccount = new Map();
+  const months = new Map(); // 'YYYY-MM' -> { income, added, removed }
+  const month = m => { if (!months.has(m)) months.set(m, { month: m, income: 0, added: 0, removed: 0 }); return months.get(m); };
+  const endCount = new Map(); // domain -> emails on the period's last day
   let firstCovered = null;
 
   for (const t of tenants.values()) {
@@ -197,36 +208,39 @@ function monthly(db, month, todayStr = new Date().toISOString().slice(0, 10)) {
     if (!dates.length) continue;
     const cache = new Map();
     const rowsFor = d => {
-      if (!cache.has(d)) cache.set(d, db.prepare('SELECT * FROM account_snapshots WHERE tenant_id = ? AND date = ?').all(t.id, d));
+      if (!cache.has(d)) cache.set(d, db.prepare('SELECT * FROM account_snapshots WHERE tenant_id = ? AND date = ?').all(t.id, d).filter(r => !isHidden(r)));
       return cache.get(d);
     };
-    for (let day = 1; day <= nDays; day++) {
-      const ds = `${month}-${String(day).padStart(2, '0')}`;
-      let snapDate = null;
-      for (const d of dates) if (d <= ds) snapDate = d;
-      if (!snapDate) continue;
+    let i = -1;
+    for (let ds = start; ds <= end; ds = addDay(ds)) {
+      while (i + 1 < dates.length && dates[i + 1] <= ds) i++;
+      if (i < 0) continue;
       if (!firstCovered || ds < firstCovered) firstCovered = ds;
-      for (const r of rowsFor(snapDate)) {
-        if (isHidden(r)) continue;
+      const perDay = daysInMonth(ds.slice(0, 7));
+      for (const r of rowsFor(dates[i])) {
         const price = priceFor(prices, r.domain, r.sku);
-        const key = `${t.id}|${r.email}|${r.sku}`;
-        if (!perAccount.has(key)) perAccount.set(key, { tenant: t.label, email: r.email, domain: r.domain, full_name: r.full_name, sku: r.sku, status: r.status, price, days: 0 });
-        const acc = perAccount.get(key);
+        const k = `${t.id}|${r.email}|${r.sku}`;
+        if (!perAccount.has(k)) perAccount.set(k, { tenant: t.label, email: r.email, domain: r.domain, full_name: r.full_name, sku: r.sku, status: r.status, price, days: 0, cost: price == null ? null : 0 });
+        const acc = perAccount.get(k);
         acc.days++;
         acc.status = r.status;
+        if (price != null) {
+          acc.cost += price / perDay;
+          month(ds.slice(0, 7)).income += price / perDay;
+        }
+        if (ds === end) endCount.set(r.domain, (endCount.get(r.domain) || 0) + 1);
       }
     }
   }
 
-  const accounts = [...perAccount.values()].map(a => ({
-    ...a,
-    cost: a.price == null ? null : Math.round(a.price * a.days / nDays * 100) / 100,
-  })).sort((a, b) => a.domain.localeCompare(b.domain) || a.email.localeCompare(b.email));
+  const round = v => Math.round(v * 100) / 100;
+  const accounts = [...perAccount.values()].map(a => ({ ...a, cost: a.cost == null ? null : round(a.cost) }))
+    .sort((a, b) => a.domain.localeCompare(b.domain) || a.email.localeCompare(b.email));
 
   const ch = changes(db, start, end);
   const domains = new Map();
   const dom = d => {
-    if (!domains.has(d)) domains.set(d, { domain: d, tenants: new Set(), accounts: 0, licensed: 0, license_days: 0, cost: 0, unpriced: 0, created: 0, deleted: 0 });
+    if (!domains.has(d)) domains.set(d, { domain: d, tenants: new Set(), accounts: 0, licensed: 0, license_days: 0, cost: 0, unpriced: 0, created: 0, deleted: 0, at_end: 0 });
     return domains.get(d);
   };
   for (const a of accounts) {
@@ -236,21 +250,32 @@ function monthly(db, month, todayStr = new Date().toISOString().slice(0, 10)) {
     if (!NOT_BILLED.has(a.sku)) { d.licensed++; d.license_days += a.days; }
     if (a.cost == null) d.unpriced++; else d.cost += a.cost;
   }
-  for (const r of ch.rows) dom(r.domain)[r.change]++;
-  const domainRows = [...domains.values()].map(d => ({ ...d, tenants: [...d.tenants], cost: Math.round(d.cost * 100) / 100 }))
+  for (const r of ch.rows) {
+    dom(r.domain)[r.change]++;
+    month(r.date.slice(0, 7))[r.change === 'created' ? 'added' : 'removed']++;
+  }
+  for (const [d, c] of endCount) dom(d).at_end = c;
+  const domainRows = [...domains.values()].map(d => ({ ...d, tenants: [...d.tenants], cost: round(d.cost) }))
     .sort((a, b) => b.cost - a.cost || a.domain.localeCompare(b.domain));
 
   return {
-    month, start, end, days: nDays,
+    period, key, start, end,
+    days: Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1,
     projected: end > todayStr,
     covered_from: firstCovered,
     currency: require('./db').getSetting(db, 'currency', 'USD'),
-    total: Math.round(accounts.reduce((s, a) => s + (a.cost || 0), 0) * 100) / 100,
+    total: round(accounts.reduce((s, a) => s + (a.cost || 0), 0)),
+    emails_at_end: [...endCount.values()].reduce((s, v) => s + v, 0),
     unpriced_accounts: accounts.filter(a => a.cost == null).length,
+    months: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)).map(m => ({ ...m, income: round(m.income) })),
     domains: domainRows,
     accounts,
     changes: ch.rows,
   };
+}
+
+function monthly(db, month, todayStr) {
+  return { month, ...billing(db, 'month', month, todayStr) };
 }
 
 function toCsv(columns, rows) {
@@ -264,4 +289,4 @@ function toCsv(columns, rows) {
   return '﻿' + [columns.map(c => esc(c.label)).join(','), ...rows.map(r => columns.map(c => esc(typeof c.get === 'function' ? c.get(r) : r[c.key])).join(','))].join('\r\n');
 }
 
-module.exports = { isHidden, overview, currentAccounts, changes, monthly, priceFor, loadPrices, toCsv, NOT_BILLED };
+module.exports = { isHidden, overview, currentAccounts, changes, billing, periodRange, monthly, priceFor, loadPrices, toCsv, NOT_BILLED };

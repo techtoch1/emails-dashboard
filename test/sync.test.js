@@ -128,3 +128,26 @@ test('a database from before last_activity gains the column on open', () => {
   const db = dbm.open(file);
   assert.ok(db.prepare('PRAGMA table_info(account_snapshots)').all().some(c => c.name === 'last_activity'));
 });
+
+test('billing report by day and by year uses the same daily proration as the month', async () => {
+  const { db, run } = setup([
+    U('full@client.example', '2026-01-01'),
+    U('new@client.example', '2026-04-16'),
+  ]);
+  for (const d of ['2026-03-31', '2026-04-16']) await run(d);
+  db.prepare("INSERT INTO prices (domain, sku, price, updated_at) VALUES ('client.example', '*', 30, 'x')").run();
+
+  const day = reports.billing(db, 'day', '2026-04-20', '2026-12-31');
+  assert.equal(day.total, 2); // two emails × 30 ÷ 30 days
+  assert.equal(day.emails_at_end, 2);
+
+  const added = reports.billing(db, 'day', '2026-04-16', '2026-12-31');
+  assert.deepEqual(added.changes.map(c => [c.change, c.email]), [['created', 'new@client.example']]);
+
+  const year = reports.billing(db, 'year', '2026', '2027-01-01');
+  const april = year.months.find(m => m.month === '2026-04');
+  assert.equal(april.income, 45);
+  assert.equal(april.added, 1);
+  assert.equal(year.total, Math.round(year.months.reduce((s, m) => s + m.income, 0) * 100) / 100);
+  assert.equal(year.covered_from, '2026-03-31');
+});
