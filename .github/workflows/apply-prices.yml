@@ -1,0 +1,34 @@
+name: Apply prices
+
+# Sets domain prices on the live dashboard from a price list, without anyone
+# uploading a file: paste CSV rows (Domain,Plan,Monthly price) when running
+# it from the Actions tab. Same rules as the Prices page's import; every
+# change lands in the price change log.
+on:
+  workflow_dispatch:
+    inputs:
+      csv:
+        description: 'CSV with a header row, e.g. Domain,Plan,Monthly price'
+        required: true
+      changed_by:
+        description: 'Name recorded in the price change log'
+        required: false
+        default: 'admin'
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      SSHPASS: ${{ secrets.WSD_SSH_PASSWORD }}
+      HOST: ${{ secrets.WSD_SSH_HOST }}
+      USER_: ${{ secrets.WSD_SSH_USER }}
+      PORT_: ${{ secrets.WSD_SSH_PORT || '269' }}
+      CSV: ${{ inputs.csv }}
+      BY: ${{ inputs.changed_by }}
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y sshpass
+      - name: Apply on server
+        run: |
+          printf '%s\n' "$CSV" | sshpass -e ssh -p "$PORT_" -o StrictHostKeyChecking=accept-new "$USER_@$HOST" \
+            "cd ~/workspace-dashboard && NODE=\$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' /etc/systemd/system/workspace-dashboard.service) && DB_FILE=~/workspace-dashboard-data/dashboard.db \"\$NODE\" --disable-warning=ExperimentalWarning ops/apply-prices.js $(printf '%q' "$BY (Actions)")"
