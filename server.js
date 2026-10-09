@@ -75,7 +75,13 @@ function createApp(db, { clientFactory } = {}) {
   });
   app.get('/api/me', (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'Not signed in' });
-    res.json({ user: req.user, syncing: sync.isSyncing() });
+    // Latest finished sync per enabled tenant: when the newest one ended, and
+    // how many tenants' latest sync failed.
+    const latest = db.prepare(`SELECT r.finished_at, r.ok FROM sync_runs r
+      JOIN (SELECT tenant_id, MAX(id) id FROM sync_runs WHERE finished_at IS NOT NULL GROUP BY tenant_id) l ON l.id = r.id
+      JOIN tenants t ON t.id = r.tenant_id AND t.enabled = 1`).all();
+    const last_sync = latest.length ? { at: latest.map(r => r.finished_at).sort().pop(), failed: latest.filter(r => !r.ok).length } : null;
+    res.json({ user: req.user, syncing: sync.isSyncing(), last_sync });
   });
 
   // ---- reports -----------------------------------------------------------

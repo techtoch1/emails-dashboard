@@ -193,3 +193,5 @@ tr.note-row > td { background: var(--surface-2); padding: 10px 14px 14px; }
 .copy-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 4px; }
 .copy-row pre.copy, .copy-row code { flex: 1; margin: 0; }
 .copy-row code { padding: 6px 8px; flex: 0 1 auto; }
+
+.top .sync-state .sync-failed { color: #ffb4ab; font-weight: 700; }

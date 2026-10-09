@@ -58,17 +58,28 @@ $('#login-form').addEventListener('submit', async e => {
   } catch (err) { $('#login-error').textContent = err.message; }
 });
 $('#logout').addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }).catch(() => {}); showLogin(); });
+// "Last synced: 9 Oct, 21:05" beside the Sync now button.
+function showLastSync(me) {
+  const el = $('#sync-state');
+  if (me?.syncing) { el.textContent = 'Syncing with Google…'; return; }
+  const ls = me?.last_sync;
+  el.innerHTML = ls
+    ? `Last synced: ${h(when(ls.at))}${ls.failed ? ` · <span class="sync-failed">${ls.failed} tenant${ls.failed === 1 ? '' : 's'} failed</span>` : ''}`
+    : 'Not synced yet';
+  el.title = ls ? new Date(ls.at).toString() : '';
+}
 $('#sync-btn').addEventListener('click', async () => {
   const r = await api('/api/sync', { method: 'POST' });
-  $('#sync-state').textContent = r.started ? 'Syncing with Google…' : r.message;
-  if (r.started || /already running/.test(r.message || '')) pollSync();
+  if (r.started || /already running/.test(r.message || '')) { $('#sync-state').textContent = 'Syncing with Google…'; pollSync(); return; }
+  $('#sync-state').textContent = r.message;
+  setTimeout(async () => showLastSync(await api('/api/me').catch(() => null)), 5000);
 });
 function pollSync() {
   const t = setInterval(async () => {
     const me = await api('/api/me').catch(() => null);
     if (me && !me.syncing) {
       clearInterval(t);
-      $('#sync-state').textContent = 'Sync finished';
+      showLastSync(me);
       state.overview = state.accounts = null;
       render();
     }
@@ -79,6 +90,8 @@ async function boot() {
   try {
     const me = await api('/api/me');
     state.me = me.user;
+    showLastSync(me);
+    if (me.syncing) pollSync();
   } catch { return showLogin(); }
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
