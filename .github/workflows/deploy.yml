@@ -8,7 +8,7 @@ name: Deploy
 #   WSD_SSH_HOST       server hostname or IP              (required)
 #   WSD_SSH_USER       SSH user, with sudo                (required)
 #   WSD_SSH_PASSWORD   that user's password               (required)
-#   WSD_SSH_PORT       SSH port                            (optional, default 22)
+#   WSD_SSH_PORT       SSH port                            (optional, default 269)
 #   WSD_HOSTNAME       public hostname of the dashboard    (optional, default emails.aligned-tech.com)
 #   WSD_ADMIN_USER / WSD_ADMIN_PASSWORD  first dashboard login, used only while none exists (optional)
 #   WSD_SA_KEY_JSON    Google service-account key JSON     (optional; can be put on the server by hand instead)
@@ -29,7 +29,7 @@ jobs:
       SSHPASS: ${{ secrets.WSD_SSH_PASSWORD }}
       HOST: ${{ secrets.WSD_SSH_HOST }}
       USER_: ${{ secrets.WSD_SSH_USER }}
-      PORT_: ${{ secrets.WSD_SSH_PORT || '22' }}
+      PORT_: ${{ secrets.WSD_SSH_PORT || '269' }}
       PUBLIC_HOST: ${{ secrets.WSD_HOSTNAME || 'emails.aligned-tech.com' }}
     steps:
       - uses: actions/checkout@v4

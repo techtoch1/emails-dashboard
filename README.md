@@ -136,7 +136,7 @@ Repo secrets (Settings → Secrets and variables → Actions):
 | `WSD_SSH_HOST` | server hostname or IP (required) |
 | `WSD_SSH_USER` | SSH user with sudo (required) |
 | `WSD_SSH_PASSWORD` | that user's password (required) |
-| `WSD_SSH_PORT` | optional, default 22 |
+| `WSD_SSH_PORT` | optional, default 269 |
 | `WSD_HOSTNAME` | public hostname of the dashboard, default `emails.aligned-tech.com` |
 | `WSD_ADMIN_USER`, `WSD_ADMIN_PASSWORD` | first dashboard login, used only while no login exists |
 | `WSD_SA_KEY_JSON` | the Google service-account key file's contents |
