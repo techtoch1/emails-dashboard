@@ -64,7 +64,6 @@ function overview(db) {
   for (const { tenant_id, date } of latestDates(db)) {
     snaps.set(tenant_id, db.prepare('SELECT * FROM tenant_snapshots WHERE tenant_id = ? AND date = ?').get(tenant_id, date));
   }
-  const overrides = db.prepare('SELECT * FROM seat_overrides').all();
   const lastRun = db.prepare(`SELECT r.* FROM sync_runs r JOIN (SELECT tenant_id, MAX(id) id FROM sync_runs GROUP BY tenant_id) l ON l.id = r.id`).all();
   const runBy = new Map(lastRun.map(r => [r.tenant_id, r]));
 
@@ -74,15 +73,7 @@ function overview(db) {
     const mine = accounts.filter(a => a.tenant_id === t.id);
     const snap = snaps.get(t.id);
     const assigned = countBy(mine.filter(a => !NOT_BILLED.has(a.sku)), a => a.sku);
-    // Seats: an admin-entered purchase count wins; otherwise what Google reports.
-    const licenses = Object.entries(assigned).map(([sku, used]) => {
-      const o = overrides.find(x => x.tenant_id === t.id && x.sku === sku);
-      return { sku, assigned: used, purchased: o ? o.seats : null, remaining: o ? o.seats - used : null, source: o ? 'entered' : null };
-    });
-    for (const o of overrides.filter(x => x.tenant_id === t.id && !assigned[x.sku])) {
-      licenses.push({ sku: o.sku, assigned: 0, purchased: o.seats, remaining: o.seats, source: 'entered' });
-    }
-    const googleSeats = snap ? JSON.parse(snap.seats) : {};
+    const licenses = Object.entries(assigned).map(([sku, used]) => ({ sku, assigned: used }));
     const run = runBy.get(t.id);
     tenantRows.push({
       id: t.id, label: t.label, admin_email: t.admin_email, primary_domain: t.primary_domain,
@@ -90,7 +81,6 @@ function overview(db) {
       accounts: mine.length,
       status: countBy(mine, a => a.status),
       licenses: licenses.sort((a, b) => b.assigned - a.assigned),
-      google_seats: googleSeats,
       hidden: everyone.filter(a => a.tenant_id === t.id && isHidden(a)).length,
       storage_gb: sum(mine, a => a.total_gb),
       pooled_used_gb: snap?.storage_used_mb != null ? Math.round(snap.storage_used_mb / 1024 * 100) / 100 : null,

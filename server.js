@@ -166,10 +166,9 @@ function createApp(db, { clientFactory } = {}) {
   });
   app.get('/api/tenants', can('tenants'), (req, res) => {
     const tenants = db.prepare('SELECT * FROM tenants ORDER BY id').all();
-    const seats = db.prepare('SELECT * FROM seat_overrides').all();
     const runs = db.prepare('SELECT * FROM sync_runs ORDER BY id DESC LIMIT 20').all()
       .map(r => ({ ...r, warnings: r.warnings ? JSON.parse(r.warnings) : [] }));
-    res.json({ tenants: tenants.map(t => ({ ...t, seats: seats.filter(s => s.tenant_id === t.id) })), runs });
+    res.json({ tenants, runs });
   });
   function tenantInput(body) {
     const label = String(body?.label || '').trim();
@@ -215,22 +214,6 @@ function createApp(db, { clientFactory } = {}) {
       db.prepare('DELETE FROM sync_runs WHERE tenant_id = ?').run(id);
       db.prepare('DELETE FROM tenants WHERE id = ?').run(id);
     });
-    res.json({ ok: true });
-  });
-  app.put('/api/tenants/:id/seats', can('tenants'), (req, res) => {
-    const sku = String(req.body?.sku || '').trim();
-    const seats = req.body?.seats === null || req.body?.seats === '' ? null : Number(req.body?.seats);
-    if (!sku) return res.status(400).json({ error: 'License is required' });
-    if (seats !== null && (!Number.isInteger(seats) || seats < 0)) return res.status(400).json({ error: 'Seats must be a whole number' });
-    // Google never lets more licenses be assigned than were bought, so a
-    // number below what is assigned now can only be a typo.
-    const assigned = reports.overview(db).tenants.find(x => x.id === Number(req.params.id))?.licenses.find(l => l.sku === sku)?.assigned || 0;
-    if (seats !== null && seats < assigned) {
-      return res.status(400).json({ error: `${assigned} ${sku} licenses are assigned now, so at least ${assigned} were bought. In the Admin console (Billing → Subscriptions) add assigned + available.` });
-    }
-    if (seats === null) db.prepare('DELETE FROM seat_overrides WHERE tenant_id = ? AND sku = ?').run(Number(req.params.id), sku);
-    else db.prepare('INSERT INTO seat_overrides (tenant_id, sku, seats) VALUES (?, ?, ?) ON CONFLICT(tenant_id, sku) DO UPDATE SET seats = excluded.seats')
-      .run(Number(req.params.id), sku, seats);
     res.json({ ok: true });
   });
   app.post('/api/tenants/:id/test', can('tenants'), async (req, res) => {

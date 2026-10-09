@@ -156,16 +156,7 @@ function kpi(label, value, sub, warn) {
   return `<div class="kpi"><div class="label">${h(label)}</div><div class="value">${value}</div><div class="sub${warn ? ' warn' : ''}">${h(sub)}</div></div>`;
 }
 function tenantCard(t) {
-  const lic = t.licenses.map(l => {
-    const pct = l.purchased ? Math.min(100, l.assigned / l.purchased * 100) : null;
-    return `<div class="lic">
-      <div class="name"><span>${h(skuShort(l.sku))}</span><span class="num">${n(l.assigned)}${l.purchased != null ? ` of ${n(l.purchased)}` : ''}</span></div>
-      ${pct != null ? `<div class="bar${pct >= 100 ? ' full' : ''}" role="img" aria-label="${l.assigned} of ${l.purchased} seats used"><span style="width:${pct}%"></span></div>
-        <div class="small ${l.remaining < 0 ? 'bad' : 'muted'}">${l.remaining < 0 ? `${n(-l.remaining)} over the purchased seats` : `${n(l.remaining)} remaining`}</div>`
-      : '<div class="small muted">Seats purchased not known — Flexible plan, or enter it under Tenants</div>'}
-    </div>`;
-  }).join('');
-  const gs = Object.entries(t.google_seats || {}).filter(([, v]) => v.total != null);
+  const lic = t.licenses.map(l => `<div class="row"><span>${h(skuShort(l.sku))}</span><span class="num">${n(l.assigned)}</span></div>`).join('');
   const s = t.last_sync;
   return `<article class="tcard">
     <h3>${h(t.label)}</h3>
@@ -176,7 +167,6 @@ function tenantCard(t) {
     ${t.pooled_total_gb ? `<div class="row"><span>Pooled storage</span><span class="num">${gb(t.pooled_used_gb)} of ${gb(t.pooled_total_gb)}</span></div>` : ''}
     <div class="row"><span>Monthly income</span><span class="num">${money(t.monthly_cost, state.overview.currency)}</span></div>
     ${lic}
-    ${gs.length ? `<div class="small muted">Google reports: ${gs.map(([k, v]) => `${h(k.replace(/_/g, ' '))} ${n(v.used)} of ${n(v.total)}`).join(' · ')}</div>` : ''}
     <div class="sync">${s ? `${s.ok ? '<span class="ok">Synced</span>' : '<span class="bad">Sync failed</span>'} ${h(when(s.at))}${s.error ? `<div class="bad">${h(s.error)}</div>` : ''}${s.warnings?.length ? `<div class="small" style="color:var(--warn-fg)">${s.warnings.length} warning${s.warnings.length === 1 ? '' : 's'} — see Tenants</div>` : ''}` : '<span class="muted">Not synced yet</span>'}</div>
   </article>`;
 }
@@ -473,7 +463,6 @@ async function viewPrices() {
 async function viewTenants() {
   const [setup, data, o] = await Promise.all([api('/api/setup'), api('/api/tenants'), getOverview()]);
   const sa = setup.serviceAccount;
-  const licByTenant = Object.fromEntries(o.tenants.map(t => [t.id, t.licenses]));
   view().innerHTML = `
     ${sectionHead('Tenants', '<button class="btn" id="t-add" type="button">Add tenant</button>')}
     <div class="note"><strong>Connecting a tenant (once per tenant, by a super admin of that tenant):</strong>
@@ -491,18 +480,6 @@ async function viewTenants() {
         <div class="actions"><button class="btn secondary small" data-test="${t.id}" type="button">Test connection</button><button class="btn secondary small" data-edit="${t.id}" type="button">Edit</button><button class="btn secondary small" data-remove="${t.id}" type="button">Remove</button></div></div>
       <div class="small">Reads as <strong>${h(t.admin_email)}</strong> · customer <code>${h(t.customer_id)}</code> · primary domain ${h(t.primary_domain || 'learned on first sync')}${t.key_file ? ` · key <code>${h(t.key_file)}</code>` : ''}</div>
       <div id="test-${t.id}"></div>
-      <div style="margin-top:10px"><span class="small muted">Licenses bought — for "remaining" on the Overview. In this tenant's Admin console → Billing → Subscriptions, add <em>assigned + available</em>. Leave empty on Flexible plans (no fixed number).</span>
-        <div class="filters" style="margin:6px 0 0">${(() => {
-          const lic = licByTenant[t.id] || [];
-          const skus = [...new Set([...lic.filter(l => l.assigned).map(l => l.sku), ...t.seats.map(s => s.sku)])];
-          return skus.map(sku => {
-            const v = t.seats.find(s => s.sku === sku)?.seats;
-            const assigned = lic.find(l => l.sku === sku)?.assigned || 0;
-            return `<label>${h(skuShort(sku))} <span class="small">${n(assigned)} assigned</span>
-              <span style="display:flex;align-items:center;gap:6px"><input type="number" min="${assigned}" step="1" class="price-input" data-seats="${t.id}" data-sku="${h(sku)}" data-assigned="${assigned}" value="${v ?? ''}" placeholder="not known" aria-label="${h(skuShort(sku))} licenses bought"><span class="saved" aria-live="polite"></span></span></label>`;
-          }).join('') || '<span class="small muted">Licenses appear here after the first sync.</span>';
-        })()}</div>
-      </div>
     </div>`).join('') : '<div class="empty">No tenants yet.</div>'}
     ${sectionHead('Recent syncs')}
     ${data.runs.length ? `<div class="table-wrap"><table><thead><tr><th>Started</th><th>Tenant</th><th>Result</th><th class="num">Accounts</th><th>Problems</th></tr></thead><tbody>
@@ -556,23 +533,6 @@ async function viewTenants() {
       out.innerHTML = `<ul class="checks small">${r.checks.map(c => `<li><span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✓' : '✗'}</span> ${h(c.name)} — ${h(c.detail)}</li>`).join('')}</ul>`;
     } catch (e) { out.innerHTML = `<p class="error">${h(e.message)}</p>`; }
   }));
-  view().querySelectorAll('[data-seats]').forEach(inp => {
-    inp.dataset.orig = inp.value;
-    inp.addEventListener('change', async () => {
-      const mark = inp.parentElement.querySelector('.saved');
-      try {
-        await api(`/api/tenants/${inp.dataset.seats}/seats`, { method: 'PUT', body: { sku: inp.dataset.sku, seats: inp.value === '' ? null : Number(inp.value) } });
-        state.overview = null;
-        inp.dataset.orig = inp.value;
-        mark.className = 'saved';
-        mark.textContent = inp.value === '' ? 'Cleared' : `${n(Number(inp.value) - Number(inp.dataset.assigned))} remaining`;
-      } catch (e) {
-        inp.value = inp.dataset.orig;
-        mark.className = 'error small';
-        mark.textContent = e.message;
-      }
-    });
-  });
 }
 
 // ---- Users (admin) -------------------------------------------------------------

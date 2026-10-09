@@ -22,11 +22,11 @@ const FIRST = ['Rami', 'Nour', 'Karim', 'Lea', 'Hadi', 'Maya', 'Omar', 'Rita', '
 const LAST = ['Haddad', 'Khoury', 'Saleh', 'Nassar', 'Aoun', 'Frem', 'Daher', 'Karam', 'Rizk', 'Mansour'];
 
 const TENANTS = [
-  { label: 'Partner tenant A', domains: ['tenant-a.example', 'cedarlogistics.example', 'bluewave.example', 'harbor-legal.example', 'olivegrove.example'], size: [60, 30, 12, 8, 5], sku: ['Business Starter', 'Business Standard'], seats: 140 },
-  { label: 'Partner tenant B', domains: ['tenant-b.example', 'northstar-media.example', 'pinecrest.example'], size: [4, 45, 18], sku: ['Business Standard', 'Business Plus'], seats: 70 },
-  { label: 'Partner tenant C', domains: ['tenant-c.example', 'summit-eng.example', 'riverbank.example'], size: [3, 22, 14], sku: ['Business Starter'], seats: null },
-  { label: 'Partner tenant D', domains: ['tenant-d.example', 'atlas-clinics.example'], size: [2, 28], sku: ['Business Standard'], seats: 32 },
-  { label: 'Partner tenant E', domains: ['tenant-e.example', 'lumen-studio.example'], size: [2, 9], sku: ['Business Starter', 'Business Standard'], seats: null },
+  { label: 'Partner tenant A', domains: ['tenant-a.example', 'cedarlogistics.example', 'bluewave.example', 'harbor-legal.example', 'olivegrove.example'], size: [60, 30, 12, 8, 5], sku: ['Business Starter', 'Business Standard'] },
+  { label: 'Partner tenant B', domains: ['tenant-b.example', 'northstar-media.example', 'pinecrest.example'], size: [4, 45, 18], sku: ['Business Standard', 'Business Plus'] },
+  { label: 'Partner tenant C', domains: ['tenant-c.example', 'summit-eng.example', 'riverbank.example'], size: [3, 22, 14], sku: ['Business Starter'] },
+  { label: 'Partner tenant D', domains: ['tenant-d.example', 'atlas-clinics.example'], size: [2, 28], sku: ['Business Standard'] },
+  { label: 'Partner tenant E', domains: ['tenant-e.example', 'lumen-studio.example'], size: [2, 9], sku: ['Business Starter', 'Business Standard'] },
 ];
 
 const specs = TENANTS.map(t => {
@@ -53,7 +53,6 @@ const specs = TENANTS.map(t => {
     const id = db.prepare('INSERT INTO tenants (label, admin_email, primary_domain, created_at) VALUES (?, ?, ?, ?)')
       .run(s.label, s.actor, s.domains[0], new Date().toISOString()).lastInsertRowid;
     s.id = id;
-    if (s.seats) db.prepare('INSERT INTO seat_overrides (tenant_id, sku, seats) VALUES (?, ?, ?)').run(id, s.sku[0], s.seats);
   }
   for (let back = 100; back >= 0; back--) {
     const date = day(back);
