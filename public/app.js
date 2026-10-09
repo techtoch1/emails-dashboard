@@ -473,7 +473,7 @@ async function viewPrices() {
 async function viewTenants() {
   const [setup, data, o] = await Promise.all([api('/api/setup'), api('/api/tenants'), getOverview()]);
   const sa = setup.serviceAccount;
-  const licByTenant = Object.fromEntries(o.tenants.map(t => [t.id, t.licenses.map(l => l.sku)]));
+  const licByTenant = Object.fromEntries(o.tenants.map(t => [t.id, t.licenses]));
   view().innerHTML = `
     ${sectionHead('Tenants', '<button class="btn" id="t-add" type="button">Add tenant</button>')}
     <div class="note"><strong>Connecting a tenant (once per tenant, by a super admin of that tenant):</strong>
@@ -491,11 +491,17 @@ async function viewTenants() {
         <div class="actions"><button class="btn secondary small" data-test="${t.id}" type="button">Test connection</button><button class="btn secondary small" data-edit="${t.id}" type="button">Edit</button><button class="btn secondary small" data-remove="${t.id}" type="button">Remove</button></div></div>
       <div class="small">Reads as <strong>${h(t.admin_email)}</strong> · customer <code>${h(t.customer_id)}</code> · primary domain ${h(t.primary_domain || 'learned on first sync')}${t.key_file ? ` · key <code>${h(t.key_file)}</code>` : ''}</div>
       <div id="test-${t.id}"></div>
-      <div style="margin-top:10px"><span class="small muted">Seats purchased (Annual plans) — leave blank on Flexible plans:</span>
-        <div class="filters" style="margin:6px 0 0">${[...new Set([...(licByTenant[t.id] || []), ...t.seats.map(s => s.sku)])].map(sku => {
-          const v = t.seats.find(s => s.sku === sku)?.seats;
-          return `<label>${h(sku)} <input type="number" min="0" step="1" class="price-input" data-seats="${t.id}" data-sku="${h(sku)}" value="${v ?? ''}" placeholder="unknown"></label>`;
-        }).join('') || '<span class="small muted">Licenses appear here after the first sync.</span>'}</div>
+      <div style="margin-top:10px"><span class="small muted">Licenses bought — for "remaining" on the Overview. In this tenant's Admin console → Billing → Subscriptions, add <em>assigned + available</em>. Leave empty on Flexible plans (no fixed number).</span>
+        <div class="filters" style="margin:6px 0 0">${(() => {
+          const lic = licByTenant[t.id] || [];
+          const skus = [...new Set([...lic.filter(l => l.assigned).map(l => l.sku), ...t.seats.map(s => s.sku)])];
+          return skus.map(sku => {
+            const v = t.seats.find(s => s.sku === sku)?.seats;
+            const assigned = lic.find(l => l.sku === sku)?.assigned || 0;
+            return `<label>${h(skuShort(sku))} <span class="small">${n(assigned)} assigned</span>
+              <span style="display:flex;align-items:center;gap:6px"><input type="number" min="${assigned}" step="1" class="price-input" data-seats="${t.id}" data-sku="${h(sku)}" data-assigned="${assigned}" value="${v ?? ''}" placeholder="not known" aria-label="${h(skuShort(sku))} licenses bought"><span class="saved" aria-live="polite"></span></span></label>`;
+          }).join('') || '<span class="small muted">Licenses appear here after the first sync.</span>';
+        })()}</div>
       </div>
     </div>`).join('') : '<div class="empty">No tenants yet.</div>'}
     ${sectionHead('Recent syncs')}
@@ -550,13 +556,23 @@ async function viewTenants() {
       out.innerHTML = `<ul class="checks small">${r.checks.map(c => `<li><span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✓' : '✗'}</span> ${h(c.name)} — ${h(c.detail)}</li>`).join('')}</ul>`;
     } catch (e) { out.innerHTML = `<p class="error">${h(e.message)}</p>`; }
   }));
-  view().querySelectorAll('[data-seats]').forEach(inp => inp.addEventListener('change', async () => {
-    try {
-      await api(`/api/tenants/${inp.dataset.seats}/seats`, { method: 'PUT', body: { sku: inp.dataset.sku, seats: inp.value === '' ? null : Number(inp.value) } });
-      state.overview = null;
-      inp.style.borderColor = 'var(--good)';
-    } catch (e) { alert(e.message); }
-  }));
+  view().querySelectorAll('[data-seats]').forEach(inp => {
+    inp.dataset.orig = inp.value;
+    inp.addEventListener('change', async () => {
+      const mark = inp.parentElement.querySelector('.saved');
+      try {
+        await api(`/api/tenants/${inp.dataset.seats}/seats`, { method: 'PUT', body: { sku: inp.dataset.sku, seats: inp.value === '' ? null : Number(inp.value) } });
+        state.overview = null;
+        inp.dataset.orig = inp.value;
+        mark.className = 'saved';
+        mark.textContent = inp.value === '' ? 'Cleared' : `${n(Number(inp.value) - Number(inp.dataset.assigned))} remaining`;
+      } catch (e) {
+        inp.value = inp.dataset.orig;
+        mark.className = 'error small';
+        mark.textContent = e.message;
+      }
+    });
+  });
 }
 
 // ---- Users (admin) -------------------------------------------------------------

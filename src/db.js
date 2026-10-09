@@ -153,6 +153,8 @@ function open(file) {
 function migrate(db) {
   const cols = new Set(db.prepare('PRAGMA table_info(account_snapshots)').all().map(c => c.name));
   if (!cols.has('last_activity')) db.exec('ALTER TABLE account_snapshots ADD COLUMN last_activity TEXT');
+  // A purchased count of 0 was only ever a mis-entry (a license in use was bought).
+  db.exec('DELETE FROM seat_overrides WHERE seats = 0');
 }
 
 function tx(db, fn) {

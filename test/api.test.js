@@ -78,3 +78,22 @@ test('accountants can start a sync, viewers cannot, and a second one waits for t
   assert.equal(second.started, false);
   assert.match(second.message, /try again in 10 min/);
 });
+
+test('licenses bought cannot be fewer than are assigned, and empty clears it', async t => {
+  const { db, server, as } = await start();
+  t.after(() => server.close());
+  const admin = await as('admin');
+  const { id } = await (await admin('/api/tenants', { method: 'POST', body: { label: 'T', admin_email: 'a@one.example' } })).json();
+  db.prepare("INSERT INTO tenant_snapshots (tenant_id, date, synced_at, domains, seats) VALUES (?, '2026-10-09', 'x', '[]', '{}')").run(id);
+  for (let i = 0; i < 3; i++) {
+    db.prepare("INSERT INTO account_snapshots (tenant_id, date, email, domain, status, sku) VALUES (?, '2026-10-09', ?, 'one.example', 'active', 'Business Standard')").run(id, `u${i}@one.example`);
+  }
+  const put = seats => admin(`/api/tenants/${id}/seats`, { method: 'PUT', body: { sku: 'Business Standard', seats } });
+  const low = await put(0);
+  assert.equal(low.status, 400);
+  assert.match((await low.json()).error, /3 Business Standard licenses are assigned/);
+  assert.equal((await put(5)).status, 200);
+  assert.equal(db.prepare('SELECT seats FROM seat_overrides').get().seats, 5);
+  assert.equal((await put(null)).status, 200);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM seat_overrides').get().n, 0);
+});
