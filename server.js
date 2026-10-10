@@ -89,7 +89,7 @@ function createApp(db, { clientFactory } = {}) {
 
   const ACCOUNT_COLS = [
     { key: 'email', label: 'Email' }, { key: 'full_name', label: 'Name' }, { key: 'domain', label: 'Domain' },
-    { key: 'tenant', label: 'Tenant' }, { key: 'status', label: 'Status' }, { key: 'sku', label: 'License' },
+    { key: 'tenant', label: 'Tenant' }, { key: 'reseller', label: 'Reseller' }, { key: 'status', label: 'Status' }, { key: 'sku', label: 'License' },
     { key: 'extra_skus', label: 'Other licenses' },
     { key: 'gmail_gb', label: 'Gmail GB' }, { key: 'drive_gb', label: 'Drive GB' }, { key: 'photos_gb', label: 'Photos GB' }, { key: 'total_gb', label: 'Total GB' },
     { get: r => r.last_active ? r.last_active.slice(0, 10) : 'Never', label: 'Last activity' },
@@ -110,7 +110,7 @@ function createApp(db, { clientFactory } = {}) {
   }
   const CHANGE_COLS = [
     { key: 'date', label: 'Date' }, { key: 'change', label: 'Change' }, { key: 'email', label: 'Email' }, { key: 'full_name', label: 'Name' },
-    { key: 'domain', label: 'Domain' }, { key: 'tenant', label: 'Tenant' }, { key: 'sku', label: 'License' },
+    { key: 'domain', label: 'Domain' }, { key: 'reseller', label: 'Reseller' }, { key: 'tenant', label: 'Tenant' }, { key: 'sku', label: 'License' },
     { key: 'monthly_cost', label: 'Monthly income' }, { key: 'by', label: 'By' }, { key: 'source', label: 'Source' },
   ];
   app.get('/api/changes', can('view'), (req, res) => res.json(reports.changes(db, ...range(req))));
@@ -131,7 +131,7 @@ function createApp(db, { clientFactory } = {}) {
   app.get('/api/billing.csv', can('money'), (req, res) => {
     const [p, key] = period(req);
     const cols = [
-      { key: 'domain', label: 'Domain' }, { key: 'tenant', label: 'Tenant' }, { key: 'email', label: 'Email' }, { key: 'full_name', label: 'Name' },
+      { key: 'domain', label: 'Domain' }, { key: 'reseller', label: 'Reseller' }, { key: 'tenant', label: 'Tenant' }, { key: 'email', label: 'Email' }, { key: 'full_name', label: 'Name' },
       { key: 'sku', label: 'License' }, { key: 'status', label: 'Status at period end' }, { key: 'price', label: 'Monthly price' },
       { key: 'days', label: 'Days billed' }, { key: 'cost', label: 'Income (prorated)' },
     ];
@@ -184,6 +184,20 @@ function createApp(db, { clientFactory } = {}) {
       res.status(400).json({ error: /zip|End of data|Corrupted/i.test(e.message) ? 'That file could not be read as Excel (.xlsx) or CSV' : e.message });
     }
   });
+  // ---- reseller per domain -------------------------------------------------
+  app.get('/api/resellers', can('view'), (req, res) => {
+    res.json({ resellers: [...new Set(reports.loadResellers(db).values())].sort((a, b) => a.localeCompare(b)) });
+  });
+  app.put('/api/domains/:domain/reseller', can('prices'), (req, res) => {
+    const domain = String(req.params.domain || '').toLowerCase().trim();
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+    const reseller = String(req.body?.reseller ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) || null;
+    db.prepare(`INSERT INTO domain_info (domain, reseller, updated_by, updated_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(domain) DO UPDATE SET reseller = excluded.reseller, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+      .run(domain, reseller, req.user.username, new Date().toISOString());
+    res.json({ ok: true, reseller });
+  });
+
   // ---- notes on domains (Prices page) -------------------------------------
   const noteOut = n => ({ ...n, mentions: JSON.parse(n.mentions) });
   app.get('/api/people', can('money'), (req, res) => {

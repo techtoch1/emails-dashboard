@@ -195,3 +195,8 @@ tr.note-row > td { background: var(--surface-2); padding: 10px 14px 14px; }
 .copy-row code { padding: 6px 8px; flex: 0 1 auto; }
 
 .top .sync-state .sync-failed { color: #ffb4ab; font-weight: 700; }
+
+/* Reseller */
+.chip.reseller { border-color: var(--aligned-med-blue); color: var(--aligned-med-blue); }
+.reseller-edit { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--text-muted); }
+.reseller-edit input { padding: 2px 6px; font-size: 12px; width: 150px; }

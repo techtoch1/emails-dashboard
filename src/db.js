@@ -137,6 +137,14 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE INDEX IF NOT EXISTS idx_notes_domain ON notes(domain);
 
+-- Facts about a domain kept by ALIGNED, e.g. the reseller it is sold through.
+CREATE TABLE IF NOT EXISTS domain_info (
+  domain     TEXT PRIMARY KEY,
+  reseller   TEXT,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS users (

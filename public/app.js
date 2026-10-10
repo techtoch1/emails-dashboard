@@ -32,6 +32,11 @@ const can = cap => state.me?.can.includes(cap);
 // Prices and income are for admins and accountants only; M() drops a piece
 // of markup for everyone else (the server leaves the numbers out too).
 const M = html => can('money') ? html : '';
+// Reseller filter: '' = all, '__direct' = sold directly, else a reseller's name.
+const resellerOptions = (names, cur) => `<option value="">All</option><option value="__direct"${cur === '__direct' ? ' selected' : ''}>Direct (no reseller)</option>`
+  + names.map(r => `<option${r === cur ? ' selected' : ''}>${h(r)}</option>`).join('');
+const resellerMatch = (want, reseller) => !want || (want === '__direct' ? !reseller : reseller === want);
+const resellerChip = r => r ? `<span class="chip reseller" title="Sold through ${h(r)}">${h(r)}</span>` : '';
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -156,27 +161,29 @@ async function viewOverview() {
     ${snapDates.length ? `<p class="small muted">Accounts as of ${h(snapDates[0])}${snapDates[0] !== snapDates.at(-1) ? `–${h(snapDates.at(-1))}` : ''}. Storage comes from Google's usage report, which runs 2–4 days behind.</p>` : ''}
     ${sectionHead('Tenants')}
     <div class="tenant-grid">${o.tenants.map(tenantCard).join('')}</div>
-    ${sectionHead('Domains', `<input type="search" id="dom-q" placeholder="Find a domain" aria-label="Find a domain">`)}
+    ${sectionHead('Domains', `<select id="dom-res" aria-label="Reseller">${resellerOptions([...new Set(o.domains.map(d => d.reseller).filter(Boolean))].sort(), '')}</select><input type="search" id="dom-q" placeholder="Find a domain" aria-label="Find a domain">`)}
     <div class="table-wrap"><table id="dom-table">
-      <thead><tr><th>Domain</th><th>Hosted on</th><th class="num">Emails</th><th class="num">Active</th><th class="num">Suspended</th><th>Licenses</th><th class="num">Storage</th>${M('<th class="num">Price / email</th><th class="num">Monthly income</th>')}</tr></thead>
+      <thead><tr><th>Domain</th><th>Hosted on</th><th>Reseller</th><th class="num">Emails</th><th class="num">Active</th><th class="num">Suspended</th><th>Licenses</th><th class="num">Storage</th>${M('<th class="num">Price / email</th><th class="num">Monthly income</th>')}</tr></thead>
       <tbody></tbody>
     </table></div>`;
   const body = $('#dom-table tbody');
   const draw = () => {
-    const q = ($('#dom-q').value || '').toLowerCase();
-    const rows = o.domains.filter(d => d.accounts && (!q || d.domain.includes(q)));
+    const q = ($('#dom-q').value || '').toLowerCase(), res = $('#dom-res').value;
+    const rows = o.domains.filter(d => d.accounts && (!q || d.domain.includes(q)) && resellerMatch(res, d.reseller));
     body.innerHTML = rows.map(d => `<tr>
       <td><button class="linkish" data-domain="${h(d.domain)}">${h(d.domain)}</button></td>
       <td>${d.tenants.map(h).join('<br>')}</td>
+      <td>${d.reseller ? resellerChip(d.reseller) : '<span class="muted small">Direct</span>'}</td>
       <td class="num">${n(d.accounts)}</td><td class="num">${n(d.active)}</td><td class="num">${d.suspended ? n(d.suspended) : ''}</td>
       <td>${Object.entries(d.licenses).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="chip">${h(skuShort(k))} × ${n(v)}</span>`).join('')}</td>
       <td class="num">${gb(d.storage_gb)}</td>
       ${M(`<td class="num">${d.price == null ? '<span class="notset">not set</span>' : money(d.price, o.currency)}</td>
       <td class="num">${d.unpriced && !d.monthly_cost ? '<span class="notset">no price</span>' : money(d.monthly_cost, o.currency)}${d.unpriced && d.monthly_cost ? `<div class="small notset">${n(d.unpriced)} unpriced</div>` : ''}</td>`)}
-    </tr>`).join('') || '<tr><td colspan="9" class="muted">No domain matches.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="10" class="muted">No domain matches.</td></tr>';
     body.querySelectorAll('[data-domain]').forEach(b => b.addEventListener('click', () => go('accounts', { domain: b.dataset.domain })));
   };
   $('#dom-q').addEventListener('input', draw);
+  $('#dom-res').addEventListener('change', draw);
   draw();
 }
 function kpi(label, value, sub, warn) {
@@ -215,6 +222,7 @@ async function viewAccounts() {
     ${sectionHead('Accounts', '<button class="btn secondary" id="acc-export" type="button">Export to Excel (CSV)</button>')}
     <div class="filters">
       <label>Tenant <select id="f-tenant">${opt(uniq('tenant'), f.tenant)}</select></label>
+      <label>Reseller <select id="f-reseller">${resellerOptions(uniq('reseller'), f.reseller)}</select></label>
       <label>Domain <select id="f-domain">${opt(uniq('domain'), f.domain)}</select></label>
       <label>License <select id="f-sku">${opt(uniq('sku'), f.sku)}</select></label>
       <label>Status <select id="f-status">${opt(['active', 'suspended', 'archived'], f.status)}</select></label>
@@ -235,7 +243,7 @@ async function viewAccounts() {
     const now = Date.now();
     const q = (f.q || '').toLowerCase();
     return rows.filter(r =>
-      (!f.tenant || r.tenant === f.tenant) && (!f.domain || r.domain === f.domain) && (!f.sku || r.sku === f.sku) &&
+      (!f.tenant || r.tenant === f.tenant) && resellerMatch(f.reseller, r.reseller) && (!f.domain || r.domain === f.domain) && (!f.sku || r.sku === f.sku) &&
       (!f.status || r.status === f.status) &&
       (!f.login || (f.login === 'never' ? !r.last_active : (!r.last_active || now - new Date(r.last_active) > f.login * 86400000))) &&
       (!q || `${r.email} ${r.full_name || ''}`.toLowerCase().includes(q)));
@@ -255,7 +263,7 @@ async function viewAccounts() {
     const shown = list.slice(0, 2000);
     $('#acc-body').innerHTML = shown.map(r => `<tr>
       <td>${h(r.email)}<div class="small muted">${h(r.full_name || '')}</div></td>
-      <td>${h(r.domain)}</td><td>${h(r.tenant)}</td>
+      <td>${h(r.domain)}${r.reseller ? `<div>${resellerChip(r.reseller)}</div>` : ''}</td><td>${h(r.tenant)}</td>
       <td>${h(skuShort(r.sku))}${r.extra_skus ? `<div class="small muted">+ ${h(r.extra_skus)}</div>` : ''}</td>
       <td>${r.status === 'active' ? 'Active' : `<span class="chip ${h(r.status)}">${h(r.status)}</span>`}</td>
       <td class="num">${gb(r.gmail_gb)}</td><td class="num">${gb(r.drive_gb)}</td><td class="num">${gb(r.total_gb)}</td>
@@ -270,14 +278,14 @@ async function viewAccounts() {
   };
   const bind = (id, key) => $(id).addEventListener(id === '#f-q' ? 'input' : 'change', e => { f[key] = e.target.value || undefined; draw(); });
   $('#f-all').addEventListener('change', e => { state.showAll = e.target.checked; state.accounts = null; render(); });
-  bind('#f-tenant', 'tenant'); bind('#f-domain', 'domain'); bind('#f-sku', 'sku'); bind('#f-status', 'status'); bind('#f-login', 'login'); bind('#f-q', 'q');
+  bind('#f-tenant', 'tenant'); bind('#f-reseller', 'reseller'); bind('#f-domain', 'domain'); bind('#f-sku', 'sku'); bind('#f-status', 'status'); bind('#f-login', 'login'); bind('#f-q', 'q');
   document.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => {
     state.sort = { col: th.dataset.col, dir: state.sort.col === th.dataset.col ? -state.sort.dir : 1 };
     draw();
   }));
   $('#acc-export').addEventListener('click', () => downloadCsv(`accounts-${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Email', 'Name', 'Domain', 'Tenant', 'License', 'Other licenses', 'Status', 'Gmail GB', 'Drive GB', 'Photos GB', 'Total GB', 'Last activity', 'Last password sign-in', 'Created', 'Org unit', ...(can('money') ? [`Monthly income (${o.currency})`] : [])],
-    filtered().map(r => [r.email, r.full_name, r.domain, r.tenant, r.sku, r.extra_skus, r.status, r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_active ? day(r.last_active) : 'Never', r.last_login ? day(r.last_login) : 'Never', day(r.created_on), r.org_unit, ...(can('money') ? [r.monthly_cost] : [])])));
+    ['Email', 'Name', 'Domain', 'Reseller', 'Tenant', 'License', 'Other licenses', 'Status', 'Gmail GB', 'Drive GB', 'Photos GB', 'Total GB', 'Last activity', 'Last password sign-in', 'Created', 'Org unit', ...(can('money') ? [`Monthly income (${o.currency})`] : [])],
+    filtered().map(r => [r.email, r.full_name, r.domain, r.reseller, r.tenant, r.sku, r.extra_skus, r.status, r.gmail_gb, r.drive_gb, r.photos_gb, r.total_gb, r.last_active ? day(r.last_active) : 'Never', r.last_login ? day(r.last_login) : 'Never', day(r.created_on), r.org_unit, ...(can('money') ? [r.monthly_cost] : [])])));
   draw();
 }
 
@@ -388,11 +396,11 @@ async function viewBilling() {
     </tbody><tfoot><tr><td>Total</td><td class="num">${n(added.length)}</td><td class="num">${n(removed.length)}</td>${M(`<td class="num">${money(r.total, cur)}</td>`)}</tr></tfoot></table></div>` : ''}
 
     ${sectionHead('By domain')}
-    <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Tenant</th><th class="num">Emails at end</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Email-days</th>${M('<th class="num">Income</th>')}</tr></thead><tbody>
-      ${r.domains.map(d => `<tr><td>${h(d.domain)}</td><td>${d.tenants.map(h).join(', ')}</td><td class="num">${n(d.at_end)}</td>
+    <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Reseller</th><th>Tenant</th><th class="num">Emails at end</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Email-days</th>${M('<th class="num">Income</th>')}</tr></thead><tbody>
+      ${r.domains.map(d => `<tr><td>${h(d.domain)}</td><td>${d.reseller ? resellerChip(d.reseller) : '<span class="muted small">Direct</span>'}</td><td>${d.tenants.map(h).join(', ')}</td><td class="num">${n(d.at_end)}</td>
         <td class="num">${d.created ? n(d.created) : ''}</td><td class="num">${d.deleted ? n(d.deleted) : ''}</td><td class="num">${n(d.license_days)}</td>
         ${M(`<td class="num">${d.unpriced && !d.cost ? '<span class="notset">no price</span>' : money(d.cost, cur)}</td>`)}</tr>`).join('')}
-    </tbody>${M(`<tfoot><tr><td colspan="6">Total</td><td class="num">${money(r.total, cur)}</td></tr></tfoot>`)}</table></div>
+    </tbody>${M(`<tfoot><tr><td colspan="7">Total</td><td class="num">${money(r.total, cur)}</td></tr></tfoot>`)}</table></div>
     ${period === 'year' ? changesSection : ''}
     ${M(`<p class="small muted">Income per email = monthly price × days it held a license ÷ days in that month. Suspended emails still hold their license, so they count; emails without a Workspace license do not.</p>`)}`;
   view().querySelectorAll('[data-period]').forEach(b => b.addEventListener('click', () => { state.filters.bperiod = b.dataset.period; render(); }));
@@ -428,6 +436,7 @@ async function viewPrices() {
         : `<span class="num">${(val ?? fallback) == null ? '<span class="notset">not set</span>' : money(val ?? fallback, p.currency)}</span>`}
     </label>`;
   const tenantsList = [...new Set(domains.flatMap(d => d.tenants))].sort();
+  const resellerNames = [...new Set(domains.map(d => d.reseller).filter(Boolean))].sort();
   // A domain is paying when its emails bring in money, free when every
   // license on it is priced at 0 (internal, not billed), and still to price
   // while any license on it has no price.
@@ -444,11 +453,13 @@ async function viewPrices() {
     </div>
     <div class="filters">
       <label>Find <input type="search" id="p-q" placeholder="Domain"></label>
+      <label>Reseller <select id="p-reseller">${resellerOptions(resellerNames, '')}</select></label>
       <label>Tenant <select id="p-tenant"><option value="">All tenants</option>${tenantsList.map(t => `<option>${h(t)}</option>`).join('')}</select></label>
       <label>Show <select id="p-show"><option value="">All domains</option><option value="unset">No price yet</option><option value="paying">Paying</option><option value="mine">Notes for me${nr.mine ? ` (${n(nr.mine)})` : ''}</option><option value="open">With open notes</option></select></label>
       <span class="spacer"></span>
       <span class="small muted" style="max-width:420px">${editable ? 'Price per email per month. A domain with two licenses (e.g. Starter and Standard) has a box for each. Saves when you leave the box; every change is logged below.' : 'Only an accountant or admin can change prices.'}</span>
     </div>
+    <datalist id="reseller-names">${resellerNames.map(r => `<option value="${h(r)}">`).join('')}</datalist>
     <div class="table-wrap"><table id="p-table" class="prices"><thead><tr><th>Domain</th><th class="num">Emails</th><th>Price per email / month</th><th class="num">Monthly income</th><th>Notes</th></tr></thead><tbody>
       ${domains.map(d => {
         const paid = paidOf(d);
@@ -456,8 +467,9 @@ async function viewPrices() {
         const boxes = paid.length > 1
           ? paid.map(([s, c]) => cell(d.domain, s, s, c, priceOf(d.domain, s), d.price)).join('')
           : cell(d.domain, '*', paid[0]?.[0] || 'All licenses', licensed, d.price);
-        return `<tr data-row="${h(d.domain)}" data-tenants="${h(d.tenants.join('|'))}" data-kind="${kindOf(d)}" data-open="${openOf(d.domain).length ? 1 : 0}" data-mine="${forMe(d.domain) ? 1 : 0}">
-          <td><strong>${h(d.domain)}</strong><div class="small muted">${d.tenants.map(h).join(', ')}</div></td>
+        return `<tr data-row="${h(d.domain)}" data-reseller="${h(d.reseller || '')}" data-tenants="${h(d.tenants.join('|'))}" data-kind="${kindOf(d)}" data-open="${openOf(d.domain).length ? 1 : 0}" data-mine="${forMe(d.domain) ? 1 : 0}">
+          <td><strong>${h(d.domain)}</strong><div class="small muted">${d.tenants.map(h).join(', ')}</div>
+            ${editable ? `<label class="reseller-edit small">Reseller <input list="reseller-names" data-reseller-for="${h(d.domain)}" value="${h(d.reseller || '')}" placeholder="Direct" aria-label="Reseller for ${h(d.domain)}"><span class="saved" aria-live="polite"></span></label>` : (d.reseller ? `<div>${resellerChip(d.reseller)}</div>` : '')}</td>
           <td class="num">${n(licensed)}</td>
           <td><div class="price-grid">${boxes}</div></td>
           <td class="num" data-income="${h(d.domain)}">${incomeCell(d)}</td>
@@ -471,9 +483,9 @@ async function viewPrices() {
     </tbody></table></div>` : '<div class="empty">No price has been changed yet.</div>'}`;
 
   const filter = () => {
-    const q = $('#p-q').value.toLowerCase(), t = $('#p-tenant').value, show = $('#p-show').value;
+    const q = $('#p-q').value.toLowerCase(), t = $('#p-tenant').value, show = $('#p-show').value, res = $('#p-reseller').value;
     view().querySelectorAll('#p-table tbody tr[data-row]').forEach(tr => {
-      const hide = (q && !tr.dataset.row.includes(q)) || (t && !tr.dataset.tenants.split('|').includes(t)) ||
+      const hide = (q && !tr.dataset.row.includes(q)) || !resellerMatch(res, tr.dataset.reseller) || (t && !tr.dataset.tenants.split('|').includes(t)) ||
         (['unset', 'paying'].includes(show) && tr.dataset.kind !== show) || (show === 'open' && tr.dataset.open !== '1') || (show === 'mine' && tr.dataset.mine !== '1');
       tr.classList.toggle('hidden', hide);
       const nrow = tr.nextElementSibling;
@@ -540,7 +552,19 @@ async function viewPrices() {
     else { row.classList.add('hidden'); e.currentTarget.setAttribute('aria-expanded', 'false'); }
   }
   view().querySelectorAll('[data-notes]').forEach(b => b.addEventListener('click', toggle));
-  ['#p-q', '#p-tenant', '#p-show'].forEach(id => $(id).addEventListener(id === '#p-q' ? 'input' : 'change', filter));
+  view().querySelectorAll('[data-reseller-for]').forEach(inp => inp.addEventListener('change', async () => {
+    const mark = inp.nextElementSibling;
+    try {
+      const r = await api(`/api/domains/${encodeURIComponent(inp.dataset.resellerFor)}/reseller`, { method: 'PUT', body: { reseller: inp.value } });
+      inp.value = r.reseller || '';
+      inp.closest('tr').dataset.reseller = r.reseller || '';
+      mark.className = 'saved'; mark.textContent = 'Saved';
+      state.overview = state.accounts = null;
+      if (r.reseller && !resellerNames.includes(r.reseller)) { resellerNames.push(r.reseller); $('#reseller-names').insertAdjacentHTML('beforeend', `<option value="${h(r.reseller)}">`); }
+      setTimeout(() => { mark.textContent = ''; }, 2000);
+    } catch (e) { mark.className = 'error'; mark.textContent = e.message; }
+  }));
+  ['#p-q', '#p-tenant', '#p-show', '#p-reseller'].forEach(id => $(id).addEventListener(id === '#p-q' ? 'input' : 'change', filter));
   view().querySelectorAll('.price-input').forEach(inp => {
     inp.dataset.orig = inp.value;
     inp.addEventListener('change', async () => {

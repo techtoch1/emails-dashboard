@@ -26,6 +26,11 @@ function priceFor(prices, domain, sku) {
   return p != null ? p : null; // null = no price entered yet
 }
 
+// domain -> reseller name (domains sold directly have none)
+function loadResellers(db) {
+  return new Map(db.prepare("SELECT domain, reseller FROM domain_info WHERE reseller IS NOT NULL AND reseller != ''").all().map(r => [r.domain, r.reseller]));
+}
+
 function tenantMap(db) {
   const m = new Map();
   for (const t of db.prepare('SELECT * FROM tenants').all()) m.set(t.id, t);
@@ -39,6 +44,7 @@ function latestDates(db) {
 function currentAccounts(db, { all = false } = {}) {
   const tenants = tenantMap(db);
   const prices = loadPrices(db);
+  const resellers = loadResellers(db);
   const out = [];
   const stmt = db.prepare('SELECT * FROM account_snapshots WHERE tenant_id = ? AND date = ? ORDER BY email');
   for (const { tenant_id, date } of latestDates(db)) {
@@ -48,7 +54,7 @@ function currentAccounts(db, { all = false } = {}) {
       if (!all && isHidden(r)) continue;
       // Last time the account was used at all: a sign-in or mailbox access.
       const last_active = [r.last_login, r.last_activity].filter(Boolean).sort().pop() || null;
-      out.push({ ...r, last_active, tenant: t.label, snapshot_date: date, monthly_cost: priceFor(prices, r.domain, r.sku) });
+      out.push({ ...r, last_active, tenant: t.label, reseller: resellers.get(r.domain) || null, snapshot_date: date, monthly_cost: priceFor(prices, r.domain, r.sku) });
     }
   }
   return out;
@@ -107,8 +113,10 @@ function overview(db) {
     d.accounts.push(a);
   }
   const prices = loadPrices(db);
+  const resellers = loadResellers(db);
   const domainRows = [...byDomain.values()].map(d => ({
     domain: d.domain,
+    reseller: resellers.get(d.domain) || null,
     tenants: [...d.tenants].sort(),
     alias_of: d.alias_of || null,
     accounts: d.accounts.length,
@@ -148,6 +156,7 @@ function overview(db) {
 function changes(db, from, to) {
   const tenants = tenantMap(db);
   const prices = loadPrices(db);
+  const resellers = loadResellers(db);
   const lastSku = db.prepare(`SELECT sku, status FROM account_snapshots WHERE tenant_id = ? AND email = ? ORDER BY date DESC LIMIT 1`);
   const rows = [];
   for (const a of db.prepare('SELECT * FROM accounts').all()) {
@@ -156,7 +165,7 @@ function changes(db, from, to) {
     const createdDate = (a.created_on || a.first_seen).slice(0, 10);
     const snap = lastSku.get(a.tenant_id, a.email) || {};
     if (isHidden(snap)) continue;
-    const base = { tenant: t.label, email: a.email, domain: a.domain, full_name: a.full_name, sku: snap.sku || null, monthly_cost: snap.sku ? priceFor(prices, a.domain, snap.sku) : null };
+    const base = { tenant: t.label, reseller: resellers.get(a.domain) || null, email: a.email, domain: a.domain, full_name: a.full_name, sku: snap.sku || null, monthly_cost: snap.sku ? priceFor(prices, a.domain, snap.sku) : null };
     if (createdDate >= from && createdDate <= to) rows.push({ ...base, change: 'created', date: createdDate, by: a.created_by, source: a.created_on ? 'Google' : 'first sync' });
     if (a.deleted_on && a.deleted_on >= from && a.deleted_on <= to) rows.push({ ...base, change: 'deleted', date: a.deleted_on, by: a.deleted_by, source: a.deleted_by ? 'audit log' : 'missing from sync' });
   }
@@ -185,6 +194,7 @@ function billing(db, period, key, todayStr = new Date().toISOString().slice(0, 1
   const tenants = tenantMap(db);
   const prices = loadPrices(db);
   const { start, end } = periodRange(period, key);
+  const resellerOf = loadResellers(db);
   const perAccount = new Map();
   const months = new Map(); // 'YYYY-MM' -> { income, added, removed }
   const month = m => { if (!months.has(m)) months.set(m, { month: m, income: 0, added: 0, removed: 0 }); return months.get(m); };
@@ -211,7 +221,7 @@ function billing(db, period, key, todayStr = new Date().toISOString().slice(0, 1
       for (const r of rowsFor(dates[i])) {
         const price = priceFor(prices, r.domain, r.sku);
         const k = `${t.id}|${r.email}|${r.sku}`;
-        if (!perAccount.has(k)) perAccount.set(k, { tenant: t.label, email: r.email, domain: r.domain, full_name: r.full_name, sku: r.sku, status: r.status, price, days: 0, cost: price == null ? null : 0 });
+        if (!perAccount.has(k)) perAccount.set(k, { tenant: t.label, reseller: resellerOf.get(r.domain) || null, email: r.email, domain: r.domain, full_name: r.full_name, sku: r.sku, status: r.status, price, days: 0, cost: price == null ? null : 0 });
         const acc = perAccount.get(k);
         acc.days++;
         acc.status = r.status;
@@ -246,7 +256,8 @@ function billing(db, period, key, todayStr = new Date().toISOString().slice(0, 1
     month(r.date.slice(0, 7))[r.change === 'created' ? 'added' : 'removed']++;
   }
   for (const [d, c] of endCount) dom(d).at_end = c;
-  const domainRows = [...domains.values()].map(d => ({ ...d, tenants: [...d.tenants], cost: round(d.cost) }))
+  const resellers = loadResellers(db);
+  const domainRows = [...domains.values()].map(d => ({ ...d, reseller: resellers.get(d.domain) || null, tenants: [...d.tenants], cost: round(d.cost) }))
     .sort((a, b) => b.cost - a.cost || a.domain.localeCompare(b.domain));
 
   return {
@@ -280,4 +291,4 @@ function toCsv(columns, rows) {
   return '﻿' + [columns.map(c => esc(c.label)).join(','), ...rows.map(r => columns.map(c => esc(typeof c.get === 'function' ? c.get(r) : r[c.key])).join(','))].join('\r\n');
 }
 
-module.exports = { isHidden, overview, currentAccounts, changes, billing, periodRange, monthly, priceFor, loadPrices, toCsv, NOT_BILLED };
+module.exports = { loadResellers, isHidden, overview, currentAccounts, changes, billing, periodRange, monthly, priceFor, loadPrices, toCsv, NOT_BILLED };

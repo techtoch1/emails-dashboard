@@ -142,3 +142,21 @@ test('viewers never receive prices or income, in JSON or in exports', async t =>
   assert.doesNotMatch(await (await viewer('/api/accounts.csv')).text(), /Monthly income/);
   assert.match(await (await acc('/api/accounts.csv')).text(), /Monthly income/);
 });
+
+test('reseller per domain: set by accountants, shown to everyone, cleared when emptied', async t => {
+  const { db, server, as } = await start();
+  t.after(() => server.close());
+  const id = db.prepare("INSERT INTO tenants (label, admin_email, created_at) VALUES ('T', 'a@t.example', 'x')").run().lastInsertRowid;
+  db.prepare("INSERT INTO tenant_snapshots (tenant_id, date, synced_at, domains, seats) VALUES (?, '2026-10-09', 'x', '[]', '{}')").run(id);
+  db.prepare("INSERT INTO account_snapshots (tenant_id, date, email, domain, status, sku) VALUES (?, '2026-10-09', 'u@client.example', 'client.example', 'active', 'Business Starter')").run(id);
+  const acc = await as('accountant'), viewer = await as('viewer');
+  assert.equal((await viewer('/api/domains/client.example/reseller', { method: 'PUT', body: { reseller: 'X' } })).status, 403);
+  await acc('/api/domains/client.example/reseller', { method: 'PUT', body: { reseller: '  Partner   One ' } });
+  const ov = await (await viewer('/api/overview')).json();
+  assert.equal(ov.domains.find(d => d.domain === 'client.example').reseller, 'Partner One');
+  assert.equal((await (await viewer('/api/accounts')).json()).accounts[0].reseller, 'Partner One');
+  assert.deepEqual((await (await viewer('/api/resellers')).json()).resellers, ['Partner One']);
+  assert.match(await (await viewer('/api/accounts.csv')).text(), /Reseller[\s\S]*Partner One/);
+  await acc('/api/domains/client.example/reseller', { method: 'PUT', body: { reseller: '' } });
+  assert.equal((await (await viewer('/api/overview')).json()).domains.find(d => d.domain === 'client.example').reseller, null);
+});
