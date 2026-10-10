@@ -1,0 +1,30 @@
+name: Diagnose
+
+# Read-only look at the live dashboard: service status, latest syncs, whether
+# the AI assistant's key works and how it has been used, and recent errors
+# from the service log. Changes nothing. Run it from the Actions tab.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      SSHPASS: ${{ secrets.WSD_SSH_PASSWORD }}
+      HOST: ${{ secrets.WSD_SSH_HOST }}
+      USER_: ${{ secrets.WSD_SSH_USER }}
+      PORT_: ${{ secrets.WSD_SSH_PORT || '269' }}
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y sshpass
+      - name: Check the server
+        run: |
+          sshpass -e ssh -p "$PORT_" -o StrictHostKeyChecking=accept-new "$USER_@$HOST" 'bash -s' <<'REMOTE'
+          echo "--- service ---"; systemctl is-active workspace-dashboard; systemctl show workspace-dashboard -p ActiveEnterTimestamp
+          cd ~/workspace-dashboard
+          NODE=$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' /etc/systemd/system/workspace-dashboard.service)
+          set -a; [ -f ~/workspace-dashboard-secrets/env ] && . ~/workspace-dashboard-secrets/env; set +a
+          DB_FILE=~/workspace-dashboard-data/dashboard.db "$NODE" --disable-warning=ExperimentalWarning ops/diagnose.js
+          echo; echo "--- recent errors in the service log ---"
+          journalctl -u workspace-dashboard --since "-2 days" --no-pager 2>/dev/null | grep -iE "error|failed|ask failed" | tail -20 || echo "(log not readable by this user)"
+          REMOTE
