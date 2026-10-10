@@ -98,6 +98,20 @@ price for "Unlicensed". If a sync is missed, the previous day's snapshot fills
 that day. For the current month, days after the latest sync are projected from
 the latest sync. The per-email CSV is the detail the accountant needs.
 
+## Ask (AI assistant)
+
+The **Ask** tab answers questions in plain language ("which domains added
+emails this month?", "who hasn't used their email in 90 days?"). Claude
+(model `claude-opus-5-5`) looks the answer up through read-only tools backed
+by the same reports as the screens; it cannot change anything.
+
+**Prices and income are for the admin only.** For every other role, money
+fields are removed from the data before it reaches Claude, so no question can
+get a price out. Each user can ask up to 40 questions an hour (`ASK_PER_HOUR`),
+and every question is logged with the tokens it used (`ai_log` table).
+Questions and the data looked up for them are sent to Anthropic's API.
+The tab says the assistant is off until `WSD_ANTHROPIC_API_KEY` is set.
+
 ## Roles
 
 - **admin**: everything, including tenants, sync and dashboard users
@@ -141,6 +155,7 @@ Repo secrets (Settings → Secrets and variables → Actions):
 | `WSD_HOSTNAME` | public hostname of the dashboard, default `emails.aligned-tech.com` |
 | `WSD_ADMIN_USER`, `WSD_ADMIN_PASSWORD` | first dashboard login, used only while no login exists |
 | `WSD_SA_KEY_JSON` | the Google service-account key file's contents |
+| `WSD_ANTHROPIC_API_KEY` | Anthropic API key; turns on the **Ask** assistant (optional) |
 
 To create more logins by hand on the server:
 `cd ~/workspace-dashboard && DB_FILE=~/workspace-dashboard-data/dashboard.db node ops/add-user.js <username> <role>`.

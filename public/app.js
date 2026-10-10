@@ -755,5 +755,91 @@ async function viewUsers() {
   }));
 }
 
-const VIEWS = { overview: viewOverview, accounts: viewAccounts, changes: viewChanges, billing: viewBilling, prices: viewPrices, tenants: viewTenants, users: viewUsers };
+// ---- Ask (AI assistant) -------------------------------------------------------
+// Minimal, safe Markdown for answers: everything is escaped first, then only
+// tables, headings, lists, bold, italics and inline code are rebuilt.
+function md(text) {
+  const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
+  const lines = h(text).split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1] || '')) {
+      const cells = l => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const head = cells(line); i++;
+      const body = [];
+      while (i + 1 < lines.length && /^\s*\|.*\|\s*$/.test(lines[i + 1])) body.push(cells(lines[++i]));
+      const num = c => /^[-+]?[$€£]?[\d,.]+%?( GB)?$/.test(c);
+      out.push(`<div class="table-wrap"><table><thead><tr>${head.map(c => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td${num(c) ? ' class="num"' : ''}>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+    } else if (/^#{1,4} /.test(line)) out.push(`<h4>${inline(line.replace(/^#+ /, ''))}</h4>`);
+    else if (/^\s*[-*] /.test(line)) {
+      const items = [line];
+      while (i + 1 < lines.length && /^\s*[-*] /.test(lines[i + 1])) items.push(lines[++i]);
+      out.push(`<ul>${items.map(x => `<li>${inline(x.replace(/^\s*[-*] /, ''))}</li>`).join('')}</ul>`);
+    } else if (/^\s*\d+\. /.test(line)) {
+      const items = [line];
+      while (i + 1 < lines.length && /^\s*\d+\. /.test(lines[i + 1])) items.push(lines[++i]);
+      out.push(`<ol>${items.map(x => `<li>${inline(x.replace(/^\s*\d+\. /, ''))}</li>`).join('')}</ol>`);
+    } else if (line.trim()) out.push(`<p>${inline(line)}</p>`);
+  }
+  return out.join('');
+}
+
+state.chat = [];
+async function viewAsk() {
+  const st = await api('/api/ask/status');
+  const examples = st.prices
+    ? ['Which domains added emails this month?', 'Total monthly income per reseller', 'Who hasn’t used their email in 90 days?', 'Which paying domains have the most suspended accounts?']
+    : ['Which domains added emails this month?', 'Who hasn’t used their email in 90 days?', 'How many emails does each tenant have?', 'Which domains are sold through a reseller?'];
+  view().innerHTML = `
+    ${sectionHead('Ask the dashboard')}
+    ${st.enabled ? '' : '<div class="banner">The AI assistant is not switched on yet: it needs an Anthropic API key on the server (the WSD_ANTHROPIC_API_KEY secret). Everything else works without it.</div>'}
+    <p class="small muted">Ask in plain words. Answers come from the dashboard’s own data, looked up live. ${st.prices ? 'As admin you can ask about prices and income too.' : 'Answers about prices and income are only available to the admin.'}</p>
+    <div class="chat" id="chat" aria-live="polite"></div>
+    <form id="ask-form" class="ask-form">
+      <textarea id="ask-q" rows="2" maxlength="2000" placeholder="e.g. Which domains added emails this month?" ${st.enabled ? '' : 'disabled'}></textarea>
+      <div class="ask-actions">
+        <button class="btn" type="submit" ${st.enabled ? '' : 'disabled'}>Ask</button>
+        <button class="btn secondary" type="button" id="ask-clear">New chat</button>
+        <span class="small muted" id="ask-left">${st.enabled ? `${n(st.remaining)} questions left this hour` : ''}</span>
+      </div>
+      <div class="examples">${examples.map(e => `<button type="button" class="chip example">${h(e)}</button>`).join('')}</div>
+    </form>`;
+  const chat = $('#chat');
+  const draw = () => {
+    chat.innerHTML = state.chat.map(m => m.role === 'user'
+      ? `<div class="msg user"><div class="bubble">${h(m.text)}</div></div>`
+      : `<div class="msg bot${m.error ? ' error-msg' : ''}"><div class="bubble">${m.pending ? '<span class="typing">Looking it up…</span>' : m.error ? h(m.text) : md(m.text)}</div></div>`).join('')
+      || '<p class="muted small">No questions yet.</p>';
+    chat.scrollTop = chat.scrollHeight;
+  };
+  draw();
+  const send = async q => {
+    q = q.trim();
+    if (!q) return;
+    const history = state.chat.filter(m => !m.pending && !m.error).map(m => ({ role: m.role, text: m.text }));
+    state.chat.push({ role: 'user', text: q }, { role: 'assistant', pending: true });
+    $('#ask-q').value = '';
+    draw();
+    const btn = $('#ask-form button[type=submit]');
+    btn.disabled = true;
+    try {
+      const r = await api('/api/ask', { method: 'POST', body: { question: q, history } });
+      state.chat[state.chat.length - 1] = { role: 'assistant', text: r.answer };
+    } catch (e) {
+      state.chat[state.chat.length - 1] = { role: 'assistant', text: e.message, error: true };
+    }
+    btn.disabled = false;
+    if (state.view === 'ask') {
+      draw();
+      api('/api/ask/status').then(s => { const el = $('#ask-left'); if (el) el.textContent = `${n(s.remaining)} questions left this hour`; }).catch(() => {});
+    }
+  };
+  $('#ask-form').addEventListener('submit', e => { e.preventDefault(); send($('#ask-q').value); });
+  $('#ask-q').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send($('#ask-q').value); } });
+  view().querySelectorAll('.example').forEach(b => b.addEventListener('click', () => send(b.textContent)));
+  $('#ask-clear').addEventListener('click', () => { state.chat = []; draw(); });
+}
+
+const VIEWS = { ask: viewAsk, overview: viewOverview, accounts: viewAccounts, changes: viewChanges, billing: viewBilling, prices: viewPrices, tenants: viewTenants, users: viewUsers };
 boot();

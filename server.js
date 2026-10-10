@@ -8,6 +8,7 @@ const dbm = require('./src/db');
 const auth = require('./src/auth');
 const reports = require('./src/reports');
 const priceImport = require('./src/priceImport');
+const ai = require('./src/ai');
 const sync = require('./src/sync');
 const { SCOPES, loadKey } = require('./src/google');
 
@@ -37,10 +38,7 @@ function createApp(db, { clientFactory } = {}) {
   // Viewers never receive prices or income: every JSON answer is scrubbed of
   // money fields for a user without the 'money' capability, so no screen or
   // browser tool can show them.
-  const MONEY_KEYS = new Set(['monthly_cost', 'price', 'cost', 'total', 'income', 'unpriced', 'unpriced_accounts', 'currency']);
-  const scrub = v => Array.isArray(v) ? v.map(scrub)
-    : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([k]) => !MONEY_KEYS.has(k)).map(([k, x]) => [k, scrub(x)]))
-    : v;
+  const { MONEY_KEYS, scrub } = require('./src/money');
   app.use('/api', (req, res, next) => {
     if (req.user && !req.user.can.includes('money')) {
       const json = res.json.bind(res);
@@ -184,6 +182,38 @@ function createApp(db, { clientFactory } = {}) {
       res.status(400).json({ error: /zip|End of data|Corrupted/i.test(e.message) ? 'That file could not be read as Excel (.xlsx) or CSV' : e.message });
     }
   });
+  // ---- AI assistant ("Ask") -------------------------------------------------
+  // Everyone signed in may ask; price answers are for the admin only (enforced
+  // in src/ai.js on the data Claude receives). A per-user hourly cap keeps
+  // the API bill predictable.
+  const askPerHour = () => Number(process.env.ASK_PER_HOUR || 40);
+  app.get('/api/ask/status', can('view'), (req, res) => {
+    const used = db.prepare("SELECT COUNT(*) n FROM ai_log WHERE username = ? AND created_at > ?").get(req.user.username, new Date(Date.now() - 3600000).toISOString()).n;
+    res.json({ enabled: ai.enabled(), prices: req.user.role === 'admin', remaining: Math.max(0, askPerHour() - used) });
+  });
+  app.post('/api/ask', can('view'), async (req, res) => {
+    if (!ai.enabled()) return res.status(503).json({ error: 'The AI assistant is not set up yet (no Anthropic API key on the server).' });
+    const question = String(req.body?.question || '').trim();
+    if (!question) return res.status(400).json({ error: 'Ask a question first' });
+    if (question.length > 2000) return res.status(400).json({ error: 'Keep the question under 2000 characters' });
+    const used = db.prepare("SELECT COUNT(*) n FROM ai_log WHERE username = ? AND created_at > ?").get(req.user.username, new Date(Date.now() - 3600000).toISOString()).n;
+    if (used >= askPerHour()) return res.status(429).json({ error: `You have asked ${askPerHour()} questions in the last hour — try again a little later.` });
+    const log = db.prepare('INSERT INTO ai_log (username, question, input_tokens, output_tokens, ok, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+    try {
+      const history = Array.isArray(req.body?.history) ? req.body.history : [];
+      const r = await ai.ask(db, req.user, question, history);
+      log.run(req.user.username, question, r.usage.input_tokens, r.usage.output_tokens, 1, new Date().toISOString());
+      res.json({ answer: r.answer, looked: r.looked });
+    } catch (e) {
+      log.run(req.user.username, question, null, null, 0, new Date().toISOString());
+      console.error('ask failed', e);
+      const msg = e?.status === 401 ? 'The Anthropic API key on the server is not valid.'
+        : e?.status === 429 ? 'The AI service is busy — try again in a minute.'
+        : 'The AI assistant could not answer just now — try again.';
+      res.status(502).json({ error: msg });
+    }
+  });
+
   // ---- reseller per domain -------------------------------------------------
   app.get('/api/resellers', can('view'), (req, res) => {
     res.json({ resellers: [...new Set(reports.loadResellers(db).values())].sort((a, b) => a.localeCompare(b)) });

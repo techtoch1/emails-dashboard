@@ -17,6 +17,7 @@
     "demo": "node --disable-warning=ExperimentalWarning ops/seed-demo.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "cookie-parser": "^1.4.6",
     "exceljs": "^4.4.0",
     "express": "^4.19.2"

@@ -200,3 +200,22 @@ tr.note-row > td { background: var(--surface-2); padding: 10px 14px 14px; }
 .chip.reseller { border-color: var(--aligned-med-blue); color: var(--aligned-med-blue); }
 .reseller-edit { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--text-muted); }
 .reseller-edit input { padding: 2px 6px; font-size: 12px; width: 150px; }
+
+/* Ask (AI assistant) */
+.chat { background: var(--surface); border: 1px solid var(--rule); padding: 14px; min-height: 220px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.msg { display: flex; }
+.msg.user { justify-content: flex-end; }
+.msg .bubble { max-width: 85%; padding: 9px 12px; border: 1px solid var(--rule); background: var(--surface-2); }
+.msg.user .bubble { background: var(--aligned-sapphire); color: #fff; border-color: var(--aligned-sapphire); white-space: pre-wrap; }
+.msg.bot .bubble p { margin: 0 0 6px; }
+.msg.bot .bubble p:last-child { margin-bottom: 0; }
+.msg.bot .bubble ul, .msg.bot .bubble ol { margin: 4px 0 8px; padding-left: 20px; }
+.msg.bot .bubble h4 { margin: 6px 0 4px; color: var(--heading); font-size: 14px; }
+.msg.bot .bubble .table-wrap { margin: 6px 0; }
+.msg.error-msg .bubble { border-color: var(--warn-border); background: var(--warn-bg); color: var(--warn-fg); }
+.typing { color: var(--text-muted); font-style: italic; }
+.ask-form { margin-top: 10px; }
+.ask-form textarea { width: 100%; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); padding: 8px 10px; resize: vertical; }
+.ask-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip.example { cursor: pointer; background: var(--surface); font: inherit; font-size: 12px; padding: 4px 9px; color: var(--link); }

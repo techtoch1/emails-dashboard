@@ -160,3 +160,24 @@ test('reseller per domain: set by accountants, shown to everyone, cleared when e
   await acc('/api/domains/client.example/reseller', { method: 'PUT', body: { reseller: '' } });
   assert.equal((await (await viewer('/api/overview')).json()).domains.find(d => d.domain === 'client.example').reseller, null);
 });
+
+test('ask: off without an API key, on with one, and capped per user per hour', async t => {
+  const ai = require('../src/ai');
+  const { server, as } = await start();
+  t.after(() => { server.close(); delete process.env.ANTHROPIC_API_KEY; });
+  const viewer = await as('viewer');
+  delete process.env.ANTHROPIC_API_KEY;
+  assert.equal((await (await viewer('/api/ask/status')).json()).enabled, false);
+  assert.equal((await viewer('/api/ask', { method: 'POST', body: { question: 'hi' } })).status, 503);
+
+  process.env.ANTHROPIC_API_KEY = 'test-key';
+  process.env.ASK_PER_HOUR = '2';
+  ai.setClient({ beta: { messages: { create: async () => ({ stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'ok' }] }) } } });
+  const st = await (await viewer('/api/ask/status')).json();
+  assert.equal(st.enabled, true);
+  assert.equal(st.prices, false);
+  assert.equal((await (await viewer('/api/ask', { method: 'POST', body: { question: 'hi' } })).json()).answer, 'ok');
+  assert.equal((await viewer('/api/ask', { method: 'POST', body: { question: 'again' } })).status, 200);
+  assert.equal((await viewer('/api/ask', { method: 'POST', body: { question: 'third' } })).status, 429);
+  delete process.env.ASK_PER_HOUR;
+});

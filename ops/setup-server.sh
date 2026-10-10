@@ -9,6 +9,7 @@
 # Optional environment (the GitHub deploy passes these from repo secrets):
 #   WSD_SA_KEY_JSON      service-account key JSON, written to the secrets dir
 #   WSD_ADMIN_USER / WSD_ADMIN_PASSWORD   first admin login, only if none exists
+#   WSD_ANTHROPIC_API_KEY  turns on the "Ask" AI assistant
 #   SUDO_ASKPASS         lets sudo take a password non-interactively
 set -euo pipefail
 HOST_NAME="${1:-emails.aligned-tech.com}"
@@ -48,6 +49,16 @@ if [ -n "${WSD_SA_KEY_JSON:-}" ]; then
   umask 077
   printf '%s' "$WSD_SA_KEY_JSON" > "$SECRETS/service-account.json"
   echo "Service-account key written."
+fi
+# Optional: the Anthropic API key for the "Ask" assistant, kept in the
+# service's EnvironmentFile (never in the code directory).
+if [ -n "${WSD_ANTHROPIC_API_KEY:-}" ]; then
+  umask 077
+  touch "$SECRETS/env"
+  grep -v '^ANTHROPIC_API_KEY=' "$SECRETS/env" > "$SECRETS/env.tmp" || true
+  printf 'ANTHROPIC_API_KEY=%s\n' "$WSD_ANTHROPIC_API_KEY" >> "$SECRETS/env.tmp"
+  mv "$SECRETS/env.tmp" "$SECRETS/env"
+  echo "Anthropic API key written (Ask assistant on)."
 fi
 [ -f "$SECRETS/service-account.json" ] || echo "NOTE: no service-account key at $SECRETS/service-account.json yet — Google sync stays off until it is there."
 

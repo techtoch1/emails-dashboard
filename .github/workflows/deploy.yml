@@ -12,6 +12,7 @@ name: Deploy
 #   WSD_HOSTNAME       public hostname of the dashboard    (optional, default emails.aligned-tech.com)
 #   WSD_ADMIN_USER / WSD_ADMIN_PASSWORD  first dashboard login, used only while none exists (optional)
 #   WSD_SA_KEY_JSON    Google service-account key JSON     (optional; can be put on the server by hand instead)
+#   WSD_ANTHROPIC_API_KEY  Anthropic API key for the Ask assistant (optional)
 on:
   push:
     branches:
@@ -72,12 +73,14 @@ jobs:
           WSD_SA_KEY_JSON: ${{ secrets.WSD_SA_KEY_JSON }}
           WSD_ADMIN_USER: ${{ secrets.WSD_ADMIN_USER }}
           WSD_ADMIN_PASSWORD: ${{ secrets.WSD_ADMIN_PASSWORD }}
+          WSD_ANTHROPIC_API_KEY: ${{ secrets.WSD_ANTHROPIC_API_KEY }}
         run: |
           {
             printf 'export SSHPW=%q\n' "$SSHPASS"
             printf 'export WSD_SA_KEY_JSON=%q\n' "$WSD_SA_KEY_JSON"
             printf 'export WSD_ADMIN_USER=%q\n' "$WSD_ADMIN_USER"
             printf 'export WSD_ADMIN_PASSWORD=%q\n' "$WSD_ADMIN_PASSWORD"
+            printf 'export WSD_ANTHROPIC_API_KEY=%q\n' "$WSD_ANTHROPIC_API_KEY"
             cat <<'REMOTE'
           set -e
           ASK=$(mktemp); chmod 700 "$ASK"

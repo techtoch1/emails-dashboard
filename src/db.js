@@ -145,6 +145,17 @@ CREATE TABLE IF NOT EXISTS domain_info (
   updated_at TEXT NOT NULL
 );
 
+-- Questions asked of the AI assistant: who, when, and the tokens it used.
+CREATE TABLE IF NOT EXISTS ai_log (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT NOT NULL,
+  question      TEXT NOT NULL,
+  input_tokens  INTEGER,
+  output_tokens INTEGER,
+  ok            INTEGER NOT NULL,
+  created_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS users (
