@@ -191,6 +191,9 @@ function createApp(db, { clientFactory } = {}) {
     const used = db.prepare("SELECT COUNT(*) n FROM ai_log WHERE username = ? AND created_at > ?").get(req.user.username, new Date(Date.now() - 3600000).toISOString()).n;
     res.json({ enabled: ai.enabled(), prices: req.user.role === 'admin', remaining: Math.max(0, askPerHour() - used) });
   });
+  // The answer streams back as server-sent events: progress while lookups
+  // run, then the answer as it is written. A comment line every 10 s keeps
+  // nginx and the browser from timing out a long answer.
   app.post('/api/ask', can('view'), async (req, res) => {
     if (!ai.enabled()) return res.status(503).json({ error: 'The AI assistant is not set up yet (no Anthropic API key on the server).' });
     const question = String(req.body?.question || '').trim();
@@ -198,19 +201,32 @@ function createApp(db, { clientFactory } = {}) {
     if (question.length > 2000) return res.status(400).json({ error: 'Keep the question under 2000 characters' });
     const used = db.prepare("SELECT COUNT(*) n FROM ai_log WHERE username = ? AND created_at > ?").get(req.user.username, new Date(Date.now() - 3600000).toISOString()).n;
     if (used >= askPerHour()) return res.status(429).json({ error: `You have asked ${askPerHour()} questions in the last hour — try again a little later.` });
-    const log = db.prepare('INSERT INTO ai_log (username, question, input_tokens, output_tokens, ok, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+
+    res.set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+    res.flushHeaders();
+    const send = ev => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`); };
+    const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 10_000);
+    const abort = new AbortController();
+    res.on('close', () => { if (!res.writableFinished) abort.abort(); });
+    const started = Date.now();
+    const log = db.prepare('INSERT INTO ai_log (username, question, input_tokens, output_tokens, ok, error, ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     try {
       const history = Array.isArray(req.body?.history) ? req.body.history : [];
-      const r = await ai.ask(db, req.user, question, history);
-      log.run(req.user.username, question, r.usage.input_tokens, r.usage.output_tokens, 1, new Date().toISOString());
-      res.json({ answer: r.answer, looked: r.looked });
+      const r = await ai.ask(db, req.user, question, history, send, abort.signal);
+      log.run(req.user.username, question, r.usage.input_tokens, r.usage.output_tokens, 1, null, Date.now() - started, new Date().toISOString());
+      send({ type: 'done', answer: r.answer });
     } catch (e) {
-      log.run(req.user.username, question, null, null, 0, new Date().toISOString());
-      console.error('ask failed', e);
+      const why = abort.signal.aborted ? 'closed by the browser' : `${e?.status || ''} ${e?.message || e}`.trim().slice(0, 300);
+      log.run(req.user.username, question, null, null, 0, why, Date.now() - started, new Date().toISOString());
+      console.error('ask failed:', why);
       const msg = e?.status === 401 ? 'The Anthropic API key on the server is not valid.'
-        : e?.status === 429 ? 'The AI service is busy — try again in a minute.'
+        : e?.status === 429 || e?.status === 529 ? 'The AI service is busy — try again in a minute.'
+        : e?.name === 'APIConnectionTimeoutError' ? 'The AI took too long to answer — try a narrower question.'
         : 'The AI assistant could not answer just now — try again.';
-      res.status(502).json({ error: msg });
+      send({ type: 'error', error: msg });
+    } finally {
+      clearInterval(ping);
+      res.end();
     }
   });
 

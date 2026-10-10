@@ -186,6 +186,9 @@ function open(file) {
 function migrate(db) {
   const cols = new Set(db.prepare('PRAGMA table_info(account_snapshots)').all().map(c => c.name));
   if (!cols.has('last_activity')) db.exec('ALTER TABLE account_snapshots ADD COLUMN last_activity TEXT');
+  const aiCols = new Set(db.prepare('PRAGMA table_info(ai_log)').all().map(c => c.name));
+  if (!aiCols.has('error')) db.exec('ALTER TABLE ai_log ADD COLUMN error TEXT');
+  if (!aiCols.has('ms')) db.exec('ALTER TABLE ai_log ADD COLUMN ms INTEGER');
   // A purchased count of 0 was only ever a mis-entry (a license in use was bought).
   db.exec('DELETE FROM seat_overrides WHERE seats = 0');
   // A price of 0 means "no price set". Clear any saved before that rule,

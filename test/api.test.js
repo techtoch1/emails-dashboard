@@ -172,11 +172,18 @@ test('ask: off without an API key, on with one, and capped per user per hour', a
 
   process.env.ANTHROPIC_API_KEY = 'test-key';
   process.env.ASK_PER_HOUR = '2';
-  ai.setClient({ beta: { messages: { create: async () => ({ stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'ok' }] }) } } });
+  ai.setClient({ beta: { messages: { stream: () => ({
+    on(ev, cb) { if (ev === 'text') this.cb = cb; return this; },
+    async finalMessage() { this.cb?.('ok'); return { stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'ok' }] }; },
+  }) } } });
   const st = await (await viewer('/api/ask/status')).json();
   assert.equal(st.enabled, true);
   assert.equal(st.prices, false);
-  assert.equal((await (await viewer('/api/ask', { method: 'POST', body: { question: 'hi' } })).json()).answer, 'ok');
+  const r = await viewer('/api/ask', { method: 'POST', body: { question: 'hi' } });
+  assert.match(r.headers.get('content-type'), /text\/event-stream/);
+  const events = (await r.text()).split('\n\n').filter(x => x.startsWith('data: ')).map(x => JSON.parse(x.slice(6)));
+  assert.deepEqual(events.map(e => e.type), ['round', 'text', 'done']);
+  assert.equal(events.at(-1).answer, 'ok');
   assert.equal((await viewer('/api/ask', { method: 'POST', body: { question: 'again' } })).status, 200);
   assert.equal((await viewer('/api/ask', { method: 'POST', body: { question: 'third' } })).status, 429);
   delete process.env.ASK_PER_HOUR;

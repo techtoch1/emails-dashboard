@@ -28,7 +28,7 @@ const dbm = require('../src/db');
   const since = new Date(Date.now() - 7 * 86400000).toISOString();
   const s = q("SELECT COUNT(*) n, SUM(ok) ok, SUM(input_tokens) i, SUM(output_tokens) o FROM ai_log WHERE created_at > ?", since)[0];
   console.log(`Questions in the last 7 days: ${s.n} (${s.ok || 0} answered, ${s.n - (s.ok || 0)} failed), tokens in/out: ${s.i || 0}/${s.o || 0}`);
-  for (const r of q('SELECT username, ok, input_tokens, output_tokens, created_at FROM ai_log ORDER BY id DESC LIMIT 10')) {
-    console.log(`  ${r.created_at}  ${r.username.padEnd(14)} ${r.ok ? 'answered' : 'FAILED  '}  ${r.input_tokens ?? '-'}/${r.output_tokens ?? '-'} tokens`);
+  for (const r of q('SELECT username, ok, input_tokens, output_tokens, error, ms, created_at FROM ai_log ORDER BY id DESC LIMIT 10')) {
+    console.log(`  ${r.created_at}  ${r.username.padEnd(14)} ${r.ok ? 'answered' : 'FAILED  '}  ${r.input_tokens ?? '-'}/${r.output_tokens ?? '-'} tokens  ${r.ms != null ? (r.ms / 1000).toFixed(1) + ' s' : ''}  ${r.error || ''}`);
   }
 })();

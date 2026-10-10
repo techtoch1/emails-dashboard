@@ -11,12 +11,12 @@ const { scrub } = require('./money');
 
 const MODEL = 'claude-opus-5-5';
 const MAX_TOOL_ROUNDS = 8;
-const MAX_ROWS = 300;
+const MAX_ROWS = 100; // keeps each lookup small: faster and cheaper answers
 
 function enabled() { return !!process.env.ANTHROPIC_API_KEY; }
 
 let client;
-function getClient() { return client ||= new Anthropic(); }
+function getClient() { return client ||= new Anthropic({ timeout: 90_000, maxRetries: 1 }); }
 function setClient(c) { client = c; } // tests use a stand-in
 
 const nullable = t => ({ type: [t, 'null'] });
@@ -37,7 +37,7 @@ const TOOLS = [
       reseller: { ...nullable('string'), description: 'Exact reseller name, or "direct" for domains with no reseller' },
     }),
   tool('list_accounts',
-    'Individual email accounts: email, name, domain, tenant, reseller, license, status, storage in GB, last activity date, creation date. Filters are optional (null to skip). Returns at most 300 rows plus the total that matched.',
+    'Individual email accounts: email, name, domain, tenant, reseller, license, status, storage in GB, last activity date, creation date. Filters are optional (null to skip) — filter as narrowly as the question allows. Returns at most 100 rows plus the total that matched.',
     {
       domain: { ...nullable('string'), description: 'Exact domain' },
       tenant: { ...nullable('string'), description: 'Exact tenant name' },
@@ -122,6 +122,21 @@ function runTool(db, name, input) {
   }
 }
 
+// Removes null/undefined fields so lookups send fewer tokens.
+function compact(v) {
+  if (Array.isArray(v)) return v.map(compact);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([, x]) => x != null).map(([k, x]) => [k, compact(x)]));
+  return v;
+}
+
+const STATUS = {
+  get_overview: 'Looking at the totals…',
+  list_domains: 'Looking up domains…',
+  list_accounts: 'Looking up accounts…',
+  get_changes: 'Checking added and removed emails…',
+  get_billing_report: 'Reading the billing report…',
+};
+
 function systemPrompt(isAdmin) {
   return `You are the assistant inside ALIGNED's Workspace Licenses dashboard, which reads ALIGNED's Google Workspace tenants (read-only) and tracks the email accounts ALIGNED provides to its clients: emails per domain, which tenant hosts each domain, resellers, licenses, storage, last activity, and accounts added and removed.
 
@@ -136,8 +151,13 @@ ${isAdmin
 You can only read data. If asked to change something (prices, tenants, users, resellers), say it has to be done on the relevant page of the dashboard.`;
 }
 
-// question: string; history: [{role:'user'|'assistant', text}] from earlier in this chat.
-async function ask(db, user, question, history = []) {
+// question: string; history: [{role:'user'|'assistant', text}] from earlier in
+// this chat. emit(event) receives progress as it happens:
+//   {type:'round'}            a new model turn starts (discard partial text)
+//   {type:'status', text}     a lookup is running
+//   {type:'text', text}       a piece of the answer
+// Resolves to {answer, usage, looked}.
+async function ask(db, user, question, history = [], emit = () => {}, signal) {
   const isAdmin = user.role === 'admin';
   const today = new Date().toISOString().slice(0, 10);
   const messages = [];
@@ -152,16 +172,21 @@ async function ask(db, user, question, history = []) {
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
   const looked = [];
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-    const response = await getClient().beta.messages.create({
+    emit({ type: 'round' });
+    const stream = getClient().beta.messages.stream({
       model: MODEL,
       max_tokens: 16000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
-      output_config: { effort: 'medium' },
+      // Data look-ups need little deliberation; low effort answers much faster.
+      output_config: { effort: 'low' },
+      cache_control: { type: 'ephemeral' }, // the instructions and tools repeat every turn
       system: systemPrompt(isAdmin),
       tools: TOOLS,
       messages,
-    });
+    }, signal ? { signal } : undefined);
+    stream.on('text', t => emit({ type: 'text', text: t }));
+    const response = await stream.finalMessage();
     for (const k of Object.keys(usage)) usage[k] += response.usage?.[k] || 0;
 
     if (response.stop_reason === 'refusal') {
@@ -181,6 +206,7 @@ async function ask(db, user, question, history = []) {
     messages.push({ role: 'assistant', content: response.content });
     const results = toolUses.map(t => {
       looked.push(t.name);
+      emit({ type: 'status', text: STATUS[t.name] || 'Looking it up…' });
       let out;
       try {
         out = runTool(db, t.name, t.input || {});
@@ -188,7 +214,7 @@ async function ask(db, user, question, history = []) {
       } catch (e) {
         return { type: 'tool_result', tool_use_id: t.id, is_error: true, content: e.message };
       }
-      return { type: 'tool_result', tool_use_id: t.id, content: JSON.stringify(out) };
+      return { type: 'tool_result', tool_use_id: t.id, content: JSON.stringify(compact(out)) };
     });
     messages.push({ role: 'user', content: results });
   }

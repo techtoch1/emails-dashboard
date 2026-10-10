@@ -786,6 +786,29 @@ function md(text) {
   return out.join('');
 }
 
+// Posts a question and reads the server-sent events it streams back.
+async function askStream(question, history, onEvent) {
+  const res = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, history }) });
+  if (res.status === 401) { showLogin(); throw new Error('Signed out'); }
+  if (!res.ok || !(res.headers.get('content-type') || '').includes('text/event-stream')) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `The assistant could not answer (${res.status}) — try again.`);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      for (const line of chunk.split('\n')) if (line.startsWith('data: ')) onEvent(JSON.parse(line.slice(6)));
+    }
+  }
+}
+
 // The assistant lives in a floating box available on every page; the
 // conversation stays open while you move between tabs.
 state.chat = [];
@@ -813,7 +836,9 @@ async function initAsk() {
     chat.innerHTML = state.chat.length
       ? state.chat.map(m => m.role === 'user'
         ? `<div class="msg user"><div class="bubble">${h(m.text)}</div></div>`
-        : `<div class="msg bot${m.error ? ' error-msg' : ''}"><div class="bubble">${m.pending ? '<span class="typing">Looking it up…</span>' : m.error ? h(m.text) : md(m.text)}</div></div>`).join('')
+        : `<div class="msg bot${m.error ? ' error-msg' : ''}"><div class="bubble">${m.pending
+            ? (m.partial ? md(m.partial) : `<span class="typing">${h(m.status || 'Thinking…')}</span>`)
+            : m.error ? h(m.text) : md(m.text)}</div></div>`).join('')
       : `<p class="small muted">Try:</p><div class="examples">${examples().map(e => `<button type="button" class="chip example">${h(e)}</button>`).join('')}</div>`;
     chat.querySelectorAll('.example').forEach(b => b.addEventListener('click', () => send(b.textContent)));
     chat.scrollTop = chat.scrollHeight;
@@ -843,11 +868,19 @@ async function initAsk() {
     draw();
     const btn = $('#ask-form button[type=submit]');
     btn.disabled = true;
+    const msg = state.chat[state.chat.length - 1];
     try {
-      const r = await api('/api/ask', { method: 'POST', body: { question: q, history } });
-      state.chat[state.chat.length - 1] = { role: 'assistant', text: r.answer };
+      await askStream(q, history, ev => {
+        if (ev.type === 'round') { msg.partial = ''; }
+        else if (ev.type === 'status') { msg.status = ev.text; msg.partial = ''; }
+        else if (ev.type === 'text') { msg.partial = (msg.partial || '') + ev.text; msg.status = null; }
+        else if (ev.type === 'done') { Object.assign(msg, { pending: false, text: ev.answer, partial: null, status: null }); }
+        else if (ev.type === 'error') { Object.assign(msg, { pending: false, error: true, text: ev.error }); }
+        draw();
+      });
+      if (msg.pending) Object.assign(msg, { pending: false, error: true, text: 'The answer was cut off — please ask again.' });
     } catch (e) {
-      state.chat[state.chat.length - 1] = { role: 'assistant', text: e.message, error: true };
+      Object.assign(msg, { pending: false, error: true, text: e.message });
     }
     btn.disabled = false;
     draw();
