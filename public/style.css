@@ -201,21 +201,31 @@ tr.note-row > td { background: var(--surface-2); padding: 10px 14px 14px; }
 .reseller-edit { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--text-muted); }
 .reseller-edit input { padding: 2px 6px; font-size: 12px; width: 150px; }
 
-/* Ask (AI assistant) */
-.chat { background: var(--surface); border: 1px solid var(--rule); padding: 14px; min-height: 220px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+/* Ask (AI assistant): floating box on every page */
+.ask-fab { position: fixed; right: 20px; bottom: 20px; z-index: 50; font: inherit; font-weight: 700; padding: 11px 18px; border: 0; border-radius: 22px; background: var(--aligned-poseidon); color: #fff; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.22); }
+.ask-fab:hover { background: var(--aligned-sapphire); }
+.ask-panel { position: fixed; right: 20px; bottom: 76px; z-index: 50; width: min(440px, calc(100vw - 32px)); height: min(600px, calc(100vh - 110px)); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 34px rgba(0,0,0,.25); }
+.ask-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--rule); color: var(--heading); }
+.ask-head .spacer { flex: 1; }
+.ask-close { font: inherit; font-size: 20px; line-height: 1; border: 0; background: none; cursor: pointer; color: var(--text-muted); padding: 0 4px; }
+.ask-note { padding: 6px 12px; border-bottom: 1px solid var(--rule); }
+.ask-panel .chat { flex: 1; min-height: 0; max-height: none; border: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
 .msg { display: flex; }
 .msg.user { justify-content: flex-end; }
-.msg .bubble { max-width: 85%; padding: 9px 12px; border: 1px solid var(--rule); background: var(--surface-2); }
+.msg .bubble { max-width: 92%; padding: 8px 11px; border: 1px solid var(--rule); background: var(--surface-2); font-size: 13px; }
 .msg.user .bubble { background: var(--aligned-sapphire); color: #fff; border-color: var(--aligned-sapphire); white-space: pre-wrap; }
 .msg.bot .bubble p { margin: 0 0 6px; }
 .msg.bot .bubble p:last-child { margin-bottom: 0; }
-.msg.bot .bubble ul, .msg.bot .bubble ol { margin: 4px 0 8px; padding-left: 20px; }
-.msg.bot .bubble h4 { margin: 6px 0 4px; color: var(--heading); font-size: 14px; }
+.msg.bot .bubble ul, .msg.bot .bubble ol { margin: 4px 0 8px; padding-left: 18px; }
+.msg.bot .bubble h4 { margin: 6px 0 4px; color: var(--heading); font-size: 13px; }
 .msg.bot .bubble .table-wrap { margin: 6px 0; }
+.msg.bot .bubble table { font-size: 12px; }
+.msg.bot .bubble th, .msg.bot .bubble td { padding: 4px 7px; }
 .msg.error-msg .bubble { border-color: var(--warn-border); background: var(--warn-bg); color: var(--warn-fg); }
 .typing { color: var(--text-muted); font-style: italic; }
-.ask-form { margin-top: 10px; }
-.ask-form textarea { width: 100%; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); padding: 8px 10px; resize: vertical; }
-.ask-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
-.examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.chip.example { cursor: pointer; background: var(--surface); font: inherit; font-size: 12px; padding: 4px 9px; color: var(--link); }
+.ask-form { padding: 10px 12px; border-top: 1px solid var(--rule); }
+.ask-form textarea { width: 100%; font: inherit; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); padding: 7px 9px; resize: none; }
+.ask-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.examples { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.chip.example { cursor: pointer; background: var(--surface); font: inherit; font-size: 12px; padding: 5px 10px; color: var(--link); text-align: left; white-space: normal; }
+@media (max-width: 760px) { .ask-fab { right: 12px; bottom: 12px; } .ask-panel { right: 8px; bottom: 64px; } }

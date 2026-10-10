@@ -51,7 +51,7 @@ async function api(path, opts = {}) {
 }
 
 // ---- session ---------------------------------------------------------------
-function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
+function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); $('#ask-fab')?.remove(); $('#ask-panel')?.remove(); state.chat = []; }
 $('#login-form').addEventListener('submit', async e => {
   e.preventDefault();
   const f = new FormData(e.target);
@@ -107,6 +107,7 @@ async function boot() {
   if (fromHash && document.querySelector(`#tabs button[data-view="${fromHash}"]:not(.hidden)`)) state.view = fromHash;
   render();
   refreshNoteBadge();
+  initAsk();
 }
 
 // Count of open notes that mention the signed-in user, on the Prices tab.
@@ -785,38 +786,57 @@ function md(text) {
   return out.join('');
 }
 
+// The assistant lives in a floating box available on every page; the
+// conversation stays open while you move between tabs.
 state.chat = [];
-async function viewAsk() {
-  const st = await api('/api/ask/status');
-  const examples = st.prices
-    ? ['Which domains added emails this month?', 'Total monthly income per reseller', 'Who hasn’t used their email in 90 days?', 'Which paying domains have the most suspended accounts?']
-    : ['Which domains added emails this month?', 'Who hasn’t used their email in 90 days?', 'How many emails does each tenant have?', 'Which domains are sold through a reseller?'];
-  view().innerHTML = `
-    ${sectionHead('Ask the dashboard')}
-    ${st.enabled ? '' : '<div class="banner">The AI assistant is not switched on yet: it needs an Anthropic API key on the server (the WSD_ANTHROPIC_API_KEY secret). Everything else works without it.</div>'}
-    <p class="small muted">Ask in plain words. Answers come from the dashboard’s own data, looked up live. ${st.prices ? 'As admin you can ask about prices and income too.' : 'Answers about prices and income are only available to the admin.'}</p>
-    <div class="chat" id="chat" aria-live="polite"></div>
-    <form id="ask-form" class="ask-form">
-      <textarea id="ask-q" rows="2" maxlength="2000" placeholder="e.g. Which domains added emails this month?" ${st.enabled ? '' : 'disabled'}></textarea>
-      <div class="ask-actions">
-        <button class="btn" type="submit" ${st.enabled ? '' : 'disabled'}>Ask</button>
-        <button class="btn secondary" type="button" id="ask-clear">New chat</button>
-        <span class="small muted" id="ask-left">${st.enabled ? `${n(st.remaining)} questions left this hour` : ''}</span>
-      </div>
-      <div class="examples">${examples.map(e => `<button type="button" class="chip example">${h(e)}</button>`).join('')}</div>
-    </form>`;
-  const chat = $('#chat');
+async function initAsk() {
+  if ($('#ask-fab')) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <button type="button" id="ask-fab" class="ask-fab" aria-expanded="false" aria-controls="ask-panel">Ask ✦</button>
+    <section id="ask-panel" class="ask-panel hidden" role="dialog" aria-label="Ask the dashboard">
+      <header class="ask-head"><strong>Ask the dashboard</strong><span class="spacer"></span>
+        <button type="button" class="linkish small" id="ask-clear">New chat</button>
+        <button type="button" class="ask-close" id="ask-close" aria-label="Close">×</button></header>
+      <div class="ask-note small muted" id="ask-note"></div>
+      <div class="chat" id="chat" aria-live="polite"></div>
+      <form id="ask-form" class="ask-form">
+        <textarea id="ask-q" rows="2" maxlength="2000" placeholder="Ask about emails, domains, tenants…"></textarea>
+        <div class="ask-actions"><button class="btn small" type="submit">Ask</button><span class="small muted" id="ask-left"></span></div>
+      </form>
+    </section>`);
+  const panel = $('#ask-panel'), fab = $('#ask-fab'), chat = $('#chat');
+  let st = null;
+  const examples = () => st?.prices
+    ? ['Which domains added emails this month?', 'Total monthly income per reseller', 'Who hasn’t used their email in 90 days?']
+    : ['Which domains added emails this month?', 'Who hasn’t used their email in 90 days?', 'How many emails does each tenant have?'];
   const draw = () => {
-    chat.innerHTML = state.chat.map(m => m.role === 'user'
-      ? `<div class="msg user"><div class="bubble">${h(m.text)}</div></div>`
-      : `<div class="msg bot${m.error ? ' error-msg' : ''}"><div class="bubble">${m.pending ? '<span class="typing">Looking it up…</span>' : m.error ? h(m.text) : md(m.text)}</div></div>`).join('')
-      || '<p class="muted small">No questions yet.</p>';
+    chat.innerHTML = state.chat.length
+      ? state.chat.map(m => m.role === 'user'
+        ? `<div class="msg user"><div class="bubble">${h(m.text)}</div></div>`
+        : `<div class="msg bot${m.error ? ' error-msg' : ''}"><div class="bubble">${m.pending ? '<span class="typing">Looking it up…</span>' : m.error ? h(m.text) : md(m.text)}</div></div>`).join('')
+      : `<p class="small muted">Try:</p><div class="examples">${examples().map(e => `<button type="button" class="chip example">${h(e)}</button>`).join('')}</div>`;
+    chat.querySelectorAll('.example').forEach(b => b.addEventListener('click', () => send(b.textContent)));
     chat.scrollTop = chat.scrollHeight;
   };
-  draw();
-  const send = async q => {
+  const refresh = async () => {
+    st = await api('/api/ask/status').catch(() => null);
+    const on = !!st?.enabled;
+    $('#ask-note').innerHTML = !st ? '' : on
+      ? `Answers come from the dashboard’s data, looked up live. ${st.prices ? 'As admin you can ask about prices too.' : 'Price answers are for the admin only.'}`
+      : 'The assistant is not switched on yet (no Anthropic API key on the server).';
+    $('#ask-q').disabled = !on;
+    $('#ask-form button[type=submit]').disabled = !on;
+    $('#ask-left').textContent = on ? `${n(st.remaining)} left this hour` : '';
+    draw();
+  };
+  const toggle = open => {
+    panel.classList.toggle('hidden', !open);
+    fab.setAttribute('aria-expanded', String(open));
+    if (open) { refresh(); setTimeout(() => $('#ask-q').focus(), 50); }
+  };
+  async function send(q) {
     q = q.trim();
-    if (!q) return;
+    if (!q || $('#ask-q').disabled) return;
     const history = state.chat.filter(m => !m.pending && !m.error).map(m => ({ role: m.role, text: m.text }));
     state.chat.push({ role: 'user', text: q }, { role: 'assistant', pending: true });
     $('#ask-q').value = '';
@@ -830,16 +850,16 @@ async function viewAsk() {
       state.chat[state.chat.length - 1] = { role: 'assistant', text: e.message, error: true };
     }
     btn.disabled = false;
-    if (state.view === 'ask') {
-      draw();
-      api('/api/ask/status').then(s => { const el = $('#ask-left'); if (el) el.textContent = `${n(s.remaining)} questions left this hour`; }).catch(() => {});
-    }
-  };
+    draw();
+    api('/api/ask/status').then(x => { st = x; $('#ask-left').textContent = `${n(x.remaining)} left this hour`; }).catch(() => {});
+  }
+  fab.addEventListener('click', () => toggle(panel.classList.contains('hidden')));
+  $('#ask-close').addEventListener('click', () => toggle(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.classList.contains('hidden')) toggle(false); });
   $('#ask-form').addEventListener('submit', e => { e.preventDefault(); send($('#ask-q').value); });
   $('#ask-q').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send($('#ask-q').value); } });
-  view().querySelectorAll('.example').forEach(b => b.addEventListener('click', () => send(b.textContent)));
   $('#ask-clear').addEventListener('click', () => { state.chat = []; draw(); });
 }
 
-const VIEWS = { ask: viewAsk, overview: viewOverview, accounts: viewAccounts, changes: viewChanges, billing: viewBilling, prices: viewPrices, tenants: viewTenants, users: viewUsers };
+const VIEWS = { overview: viewOverview, accounts: viewAccounts, changes: viewChanges, billing: viewBilling, prices: viewPrices, tenants: viewTenants, users: viewUsers };
 boot();
