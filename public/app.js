@@ -426,6 +426,17 @@ async function viewPrices() {
   const domains = p.domains.filter(d => d.accounts);
   const priceOf = (d, s) => p.prices.find(x => x.domain === d && x.sku === s)?.price;
   const incomeCell = d => d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, p.currency);
+  // What one email on the domain pays per month: the price itself, or for a
+  // domain with several licenses the average (income ÷ emails) and the range.
+  const perEmailCell = (d, prices, cur) => {
+    const paid = Object.entries(d.licenses).filter(([s]) => !['Unlicensed', 'Unknown', 'Cloud Identity Free'].includes(s));
+    const each = paid.map(([s]) => prices.find(x => x.domain === d.domain && x.sku === s && x.price > 0)?.price ?? d.price);
+    if (!paid.length || each.some(v => v == null || !(v > 0))) return '<span class="notset">—</span>';
+    const emails = paid.reduce((a, [, c]) => a + c, 0);
+    const lo = Math.min(...each), hi = Math.max(...each);
+    if (lo === hi) return money(lo, cur);
+    return `${money(Math.round(d.monthly_cost / emails * 100) / 100, cur)} <span class="small muted">avg</span><div class="small muted">${money(lo, cur)}–${money(hi, cur)}</div>`;
+  };
   const paidOf = d => Object.entries(d.licenses).filter(([s]) => !['Unlicensed', 'Unknown', 'Cloud Identity Free'].includes(s)).sort((a, b) => b[1] - a[1]);
   // A license with its own price box. A domain with one license stores the
   // domain price ('*'); with several, each license has its own, falling back
@@ -461,7 +472,7 @@ async function viewPrices() {
       <span class="small muted" style="max-width:420px">${editable ? 'Price per email per month. A domain with two licenses (e.g. Starter and Standard) has a box for each. Saves when you leave the box; every change is logged below.' : 'Only an accountant or admin can change prices.'}</span>
     </div>
     <datalist id="reseller-names">${resellerNames.map(r => `<option value="${h(r)}">`).join('')}</datalist>
-    <div class="table-wrap"><table id="p-table" class="prices"><thead><tr><th>Domain</th><th class="num">Emails</th><th>Price per email / month</th><th class="num">Monthly income</th><th>Notes</th></tr></thead><tbody>
+    <div class="table-wrap"><table id="p-table" class="prices"><thead><tr><th>Domain</th><th class="num">Emails</th><th>Price per email / month</th><th class="num">Price / email</th><th class="num">Monthly income</th><th>Notes</th></tr></thead><tbody>
       ${domains.map(d => {
         const paid = paidOf(d);
         const licensed = paid.reduce((a, [, v]) => a + v, 0);
@@ -473,9 +484,10 @@ async function viewPrices() {
             ${editable ? `<label class="reseller-edit small">Reseller <input list="reseller-names" data-reseller-for="${h(d.domain)}" value="${h(d.reseller || '')}" placeholder="Direct" aria-label="Reseller for ${h(d.domain)}"><span class="saved" aria-live="polite"></span></label>` : (d.reseller ? `<div>${resellerChip(d.reseller)}</div>` : '')}</td>
           <td class="num">${n(licensed)}</td>
           <td><div class="price-grid">${boxes}</div></td>
+          <td class="num" data-per-email="${h(d.domain)}">${perEmailCell(d, p.prices, p.currency)}</td>
           <td class="num" data-income="${h(d.domain)}">${incomeCell(d)}</td>
           <td>${noteBtn(d.domain)}</td></tr>
-          <tr class="note-row hidden" data-for="${h(d.domain)}"><td colspan="5"></td></tr>`;
+          <tr class="note-row hidden" data-for="${h(d.domain)}"><td colspan="6"></td></tr>`;
       }).join('')}
     </tbody></table></div>
     ${sectionHead('Change log')}
@@ -581,6 +593,8 @@ async function viewPrices() {
           const d = fresh.domains.find(x => x.domain === inp.dataset.domain);
           const c = d && view().querySelector(`[data-income="${CSS.escape(d.domain)}"]`);
           if (c) c.innerHTML = d.unpriced && !d.monthly_cost ? '<span class="notset">—</span>' : money(d.monthly_cost, fresh.currency);
+          const pe = d && view().querySelector(`[data-per-email="${CSS.escape(d.domain)}"]`);
+          if (pe) pe.innerHTML = perEmailCell(d, fresh.prices, fresh.currency);
           const tr = c?.closest('tr');
           if (tr) tr.dataset.kind = kindOf(d);
         }).catch(() => {});
