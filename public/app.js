@@ -471,6 +471,7 @@ async function viewPrices() {
       <span class="spacer"></span>
       <span class="small muted" style="max-width:420px">${editable ? 'Price per email per month. A domain with two licenses (e.g. Starter and Standard) has a box for each. Saves when you leave the box; every change is logged below.' : 'Only an accountant or admin can change prices.'}</span>
     </div>
+    <p class="count" id="p-count"></p>
     <datalist id="reseller-names">${resellerNames.map(r => `<option value="${h(r)}">`).join('')}</datalist>
     <div class="table-wrap"><table id="p-table" class="prices"><thead><tr><th>Domain</th><th class="num">Emails</th><th>Price per email / month</th><th class="num">Price / email</th><th class="num">Monthly income</th><th>Notes</th></tr></thead><tbody>
       ${domains.map(d => {
@@ -479,7 +480,7 @@ async function viewPrices() {
         const boxes = paid.length > 1
           ? paid.map(([s, c]) => cell(d.domain, s, s, c, priceOf(d.domain, s), d.price)).join('')
           : cell(d.domain, '*', paid[0]?.[0] || 'All licenses', licensed, d.price);
-        return `<tr data-row="${h(d.domain)}" data-reseller="${h(d.reseller || '')}" data-tenants="${h(d.tenants.join('|'))}" data-kind="${kindOf(d)}" data-open="${openOf(d.domain).length ? 1 : 0}" data-mine="${forMe(d.domain) ? 1 : 0}">
+        return `<tr data-row="${h(d.domain)}" data-emails="${licensed}" data-reseller="${h(d.reseller || '')}" data-tenants="${h(d.tenants.join('|'))}" data-kind="${kindOf(d)}" data-open="${openOf(d.domain).length ? 1 : 0}" data-mine="${forMe(d.domain) ? 1 : 0}">
           <td><strong>${h(d.domain)}</strong><div class="small muted">${d.tenants.map(h).join(', ')}</div>
             ${editable ? `<label class="reseller-edit small">Reseller <input list="reseller-names" data-reseller-for="${h(d.domain)}" value="${h(d.reseller || '')}" placeholder="Direct" aria-label="Reseller for ${h(d.domain)}"><span class="saved" aria-live="polite"></span></label>` : (d.reseller ? `<div>${resellerChip(d.reseller)}</div>` : '')}</td>
           <td class="num">${n(licensed)}</td>
@@ -504,6 +505,11 @@ async function viewPrices() {
       const nrow = tr.nextElementSibling;
       if (hide) nrow.classList.add('hidden');
     });
+    // Count what the filters leave: domains and the emails on them.
+    const shown = [...view().querySelectorAll('#p-table tbody tr[data-row]:not(.hidden)')];
+    const emails = shown.reduce((a, tr) => a + Number(tr.dataset.emails || 0), 0);
+    const label = { unset: ' with no price yet', paying: ' paying', open: ' with open notes', mine: ' with notes for you' }[show] || '';
+    $('#p-count').innerHTML = `<strong>${n(shown.length)}</strong> domain${shown.length === 1 ? '' : 's'}${label} · <strong>${n(emails)}</strong> email${emails === 1 ? '' : 's'}`;
   };
 
   // Notes: a thread under the domain's row.
@@ -578,6 +584,7 @@ async function viewPrices() {
     } catch (e) { mark.className = 'error'; mark.textContent = e.message; }
   }));
   ['#p-q', '#p-tenant', '#p-show', '#p-reseller'].forEach(id => $(id).addEventListener(id === '#p-q' ? 'input' : 'change', filter));
+  filter();
   view().querySelectorAll('.price-input').forEach(inp => {
     inp.dataset.orig = inp.value;
     inp.addEventListener('change', async () => {
@@ -596,7 +603,7 @@ async function viewPrices() {
           const pe = d && view().querySelector(`[data-per-email="${CSS.escape(d.domain)}"]`);
           if (pe) pe.innerHTML = perEmailCell(d, fresh.prices, fresh.currency);
           const tr = c?.closest('tr');
-          if (tr) tr.dataset.kind = kindOf(d);
+          if (tr) { tr.dataset.kind = kindOf(d); filter(); }
         }).catch(() => {});
         setTimeout(() => { mark.textContent = ''; }, 2500);
       } catch (e) { mark.textContent = e.message; mark.className = 'error'; inp.value = inp.dataset.orig; }
